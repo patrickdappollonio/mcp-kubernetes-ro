@@ -1,0 +1,31 @@
+name: Testing
+on:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-app:
+    name: Test Application
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Test application
+        run: go test ./...
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Dry-run goreleaser application
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: ~> v2
+          args: release --snapshot --skip=publish --clean
