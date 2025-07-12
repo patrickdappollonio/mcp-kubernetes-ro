@@ -1,0 +1,80 @@
+version: 2
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    tags:
+      - netgo
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{.Version}} -extldflags "-static"
+
+dockers:
+  - image_templates:
+      - "ghcr.io/patrickdappollonio/mcp-kubernetes-ro:{{ .Tag }}-amd64"
+    goos: linux
+    goarch: amd64
+    use: buildx
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
+      - "--label=org.opencontainers.image.description={{ .ProjectName }} version {{ .Version }}. See release notes at https://github.com/patrickdappollonio/{{ .ProjectName }}/releases/tag/v{{ .RawVersion }}"
+      - "--label=org.opencontainers.image.url=https://github.com/patrickdappollonio/{{ .ProjectName }}"
+      - "--label=org.opencontainers.image.source=https://github.com/patrickdappollonio/{{ .ProjectName }}"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - '--label=org.opencontainers.image.created={{ time "2006-01-02T15:04:05Z07:00" }}'
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+
+  - image_templates:
+      - "ghcr.io/patrickdappollonio/mcp-kubernetes-ro:{{ .Tag }}-arm64"
+    goos: linux
+    goarch: arm64
+    use: buildx
+    build_flag_templates:
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
+      - "--label=org.opencontainers.image.description={{ .ProjectName }} version {{ .Version }}. See release notes at https://github.com/patrickdappollonio/{{ .ProjectName }}/releases/tag/v{{ .RawVersion }}"
+      - "--label=org.opencontainers.image.url=https://github.com/patrickdappollonio/{{ .ProjectName }}"
+      - "--label=org.opencontainers.image.source=https://github.com/patrickdappollonio/{{ .ProjectName }}"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - '--label=org.opencontainers.image.created={{ time "2006-01-02T15:04:05Z07:00" }}'
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+
+docker_manifests:
+  - name_template: "ghcr.io/patrickdappollonio/mcp-kubernetes-ro:v{{ .RawVersion }}"
+    image_templates:
+      - "ghcr.io/patrickdappollonio/mcp-kubernetes-ro:{{ .Tag }}-amd64"
+      - "ghcr.io/patrickdappollonio/mcp-kubernetes-ro:{{ .Tag }}-arm64"
+  - name_template: "ghcr.io/patrickdappollonio/mcp-kubernetes-ro:v{{ .Major }}"
+    image_templates:
+      - "ghcr.io/patrickdappollonio/mcp-kubernetes-ro:{{ .Tag }}-amd64"
+      - "ghcr.io/patrickdappollonio/mcp-kubernetes-ro:{{ .Tag }}-arm64"
+  - name_template: "ghcr.io/patrickdappollonio/mcp-kubernetes-ro:latest"
+    image_templates:
+      - "ghcr.io/patrickdappollonio/mcp-kubernetes-ro:{{ .Tag }}-amd64"
+      - "ghcr.io/patrickdappollonio/mcp-kubernetes-ro:{{ .Tag }}-arm64"
+
+archives:
+  - name_template: >-
+      {{ .ProjectName }}_
+      {{- tolower .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+checksum:
+  name_template: "checksums.txt"
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"

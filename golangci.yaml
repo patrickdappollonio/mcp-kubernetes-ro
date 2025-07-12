@@ -1,0 +1,126 @@
+version: "2"
+run:
+  concurrency: 5
+  tests: false
+linters:
+  default: none
+  enable:
+    - asasalint
+    - asciicheck
+    - bidichk
+    - bodyclose
+    - contextcheck
+    - copyloopvar
+    - decorder
+    - dogsled
+    - dupl
+    - dupword
+    - durationcheck
+    - errchkjson
+    - errname
+    - errorlint
+    - exhaustive
+    - ginkgolinter
+    - gocheckcompilerdirectives
+    - gochecksumtype
+    - gocritic
+    - gocyclo
+    - goheader
+    - gomodguard
+    - goprintffuncname
+    - gosec
+    - gosmopolitan
+    - govet
+    - grouper
+    - importas
+    - inamedparam
+    - ineffassign
+    - ireturn
+    - loggercheck
+    - makezero
+    - mirror
+    - misspell
+    - musttag
+    - nakedret
+    - nilerr
+    - nilnil
+    - noctx
+    - nonamedreturns
+    - nosprintfhostport
+    - paralleltest
+    - perfsprint
+    - prealloc
+    - predeclared
+    - promlinter
+    - protogetter
+    - reassign
+    - revive
+    - rowserrcheck
+    - sloglint
+    - spancheck
+    - sqlclosecheck
+    - staticcheck
+    - testableexamples
+    - testifylint
+    - testpackage
+    - thelper
+    - tparallel
+    - unconvert
+    - unparam
+    - unused
+    - usestdlibvars
+    - wastedassign
+    - whitespace
+    - wrapcheck
+    - zerologlint
+  settings:
+    gocritic:
+      enable-all: true
+      disabled-checks:
+        - appendAssign
+        - unnamedResult
+        - badRegexp
+    gocyclo:
+      min-complexity: 60
+    gosec:
+      excludes:
+        - G401
+        - G505
+      confidence: medium
+    ireturn:
+      allow:
+        - error
+        - http.Handler
+    perfsprint:
+      int-conversion: false
+      err-error: false
+      errorf: true
+      sprintf1: true
+      strconcat: false
+    staticcheck:
+      checks:
+        - -SA1019
+        - -ST1003
+        - all
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
+    - gofmt
+    - gofumpt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
