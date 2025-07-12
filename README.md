@@ -23,6 +23,20 @@ The server leverages your local `kubectl` configuration (even when `kubectl` is 
 
 ## Installation
 
+Feel free to grab a pre-built binary from the [releases page](https://github.com/patrickdappollonio/mcp-kubernetes-ro/releases).
+
+Alternatively, you can use Homebrew in macOS or Linux to install it:
+
+```bash
+brew install patrickdappollonio/tap/mcp-kubernetes-ro
+```
+
+Finally, Docker users can use the prebuilt image from the GitHub Container Registry:
+
+```bash
+docker pull ghcr.io/patrickdappollonio/mcp-kubernetes-ro:latest
+```
+
 ### Editor Configuration
 
 Add the following configuration to your editor's settings to use `mcp-kubernetes-ro`:
@@ -50,15 +64,34 @@ Add the following configuration to your editor's settings to use `mcp-kubernetes
 
 You can use `mcp-kubernetes-ro` directly from your `$PATH` as shown above, or provide the full path to the binary (e.g., `/path/to/mcp-kubernetes-ro`).
 
+And this is how to leverage the Docker image instead:
+
+```json5
+{
+  "mcpServers": {
+    "kubernetes-ro": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e", "KUBECONFIG=/root/.kube/config",
+        "-v", "/path/to/kubeconfig:/root/.kube/config",
+        "ghcr.io/patrickdappollonio/mcp-kubernetes-ro"
+      ]
+    },
+  }
+}
+```
+
+Do note that you'll need to mount your kubeconfig file into the container, and either set the `KUBECONFIG` environment variable to the path of the mounted file, or use the `--kubeconfig` flag to set it.
+
 ### Prerequisites
 
 - A valid Kubernetes configuration file (typically `~/.kube/config`)
 - Valid credentials and cluster access (kubectl binary is not required)
 - Appropriate RBAC permissions for read operations
-- **Metrics Server** (required for metrics tools): For metrics functionality (`get_node_metrics`, `get_pod_metrics`), the metrics-server must be installed in your cluster. If not available, these tools will return helpful error messages with installation instructions. You can install it with:
-  ```bash
-  kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
-  ```
+- **Metrics Server** (required for metrics tools): For metrics functionality (`get_node_metrics`, `get_pod_metrics`), the metrics-server must be installed in your cluster. If not available, these tools will return an error message.
 
 ## Available MCP Tools
 
