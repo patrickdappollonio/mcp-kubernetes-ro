@@ -1,5 +1,7 @@
 # Kubernetes read-only MCP server
 
+[![Github Downloads](https://img.shields.io/github/downloads/patrickdappollonio/mcp-kubernetes-ro/total?color=orange&label=github%20downloads)](https://github.com/patrickdappollonio/mcp-kubernetes-ro/releases)
+
 <img src="kubernetes-ro.png" alt="Kubernetes read-only MCP server" width="200" height="200" align="right"> `mcp-kubernetes-ro` is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/introduction) server providing read-only access to Kubernetes clusters for AI assistants. It enables AI models to list resources, get resource details, retrieve pod logs, discover API resources, and perform base64 encoding/decoding operations - all while maintaining security through read-only access.
 
 The server leverages your local `kubectl` configuration (even when `kubectl` is not required to be installed) and provides a safe, read-only interface to your Kubernetes clusters, preventing any destructive operations while allowing comprehensive cluster inspection and troubleshooting capabilities.
