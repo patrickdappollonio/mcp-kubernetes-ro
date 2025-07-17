@@ -20,11 +20,18 @@ import (
 	"github.com/patrickdappollonio/mcp-kubernetes-ro/internal/response"
 )
 
+// ResourceHandler provides MCP tools for Kubernetes resource operations.
+// It handles listing and retrieving resources across all API groups, with support
+// for filtering, pagination, and dynamic resource type resolution. The handler
+// supports both namespaced and cluster-scoped resources.
 type ResourceHandler struct {
 	client     *kubernetes.Client
 	baseConfig *kubernetes.Config
 }
 
+// NewResourceHandler creates a new ResourceHandler with the provided Kubernetes client
+// and base configuration. The base configuration provides default values that can
+// be overridden on a per-request basis.
 func NewResourceHandler(client *kubernetes.Client, baseConfig *kubernetes.Config) *ResourceHandler {
 	return &ResourceHandler{
 		client:     client,
@@ -32,17 +39,44 @@ func NewResourceHandler(client *kubernetes.Client, baseConfig *kubernetes.Config
 	}
 }
 
+// ListResourcesParams defines the parameters for the list_resources MCP tool.
+// It supports comprehensive filtering and pagination options for resource queries.
 type ListResourcesParams struct {
-	ResourceType  string `json:"resource_type"`
-	APIVersion    string `json:"api_version,omitempty"`
-	Namespace     string `json:"namespace,omitempty"`
-	Context       string `json:"context,omitempty"`
+	// ResourceType is the type of resource to list (e.g., "pods", "deployments").
+	// Supports plural names, singular names, kinds, and short names.
+	ResourceType string `json:"resource_type"`
+
+	// APIVersion optionally constrains the search to a specific API version.
+	// If empty, searches across all available API versions.
+	APIVersion string `json:"api_version,omitempty"`
+
+	// Namespace specifies the target namespace for namespaced resources.
+	// Leave empty for cluster-scoped resources.
+	Namespace string `json:"namespace,omitempty"`
+
+	// Context specifies which Kubernetes context to use for this operation.
+	// If empty, uses the current context from kubeconfig.
+	Context string `json:"context,omitempty"`
+
+	// LabelSelector filters resources by labels (e.g., "app=nginx,version=1.0").
 	LabelSelector string `json:"label_selector,omitempty"`
+
+	// FieldSelector filters resources by fields (e.g., "status.phase=Running").
 	FieldSelector string `json:"field_selector,omitempty"`
-	Limit         int    `json:"limit,omitempty"`
-	Continue      string `json:"continue,omitempty"`
+
+	// Limit restricts the maximum number of resources returned.
+	// If 0, returns all matching resources.
+	Limit int `json:"limit,omitempty"`
+
+	// Continue is a pagination token from a previous response.
+	// Used to retrieve the next page of results.
+	Continue string `json:"continue,omitempty"`
 }
 
+// ListResources implements the list_resources MCP tool.
+// It retrieves a list of Kubernetes resources of the specified type with optional
+// filtering and pagination. Results are sorted by creation timestamp (newest first)
+// for consistent ordering across requests.
 func (h *ResourceHandler) ListResources(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	var params ListResourcesParams
 	if err := request.BindArguments(&params); err != nil {
@@ -126,14 +160,32 @@ func (h *ResourceHandler) ListResources(ctx context.Context, request mcp.CallToo
 	return response.JSON(result)
 }
 
+// GetResourceParams defines the parameters for the get_resource MCP tool.
+// It specifies which specific resource instance to retrieve by name and type.
 type GetResourceParams struct {
+	// ResourceType is the type of resource to retrieve (e.g., "pod", "deployment").
+	// Supports plural names, singular names, kinds, and short names.
 	ResourceType string `json:"resource_type"`
-	Name         string `json:"name"`
-	APIVersion   string `json:"api_version,omitempty"`
-	Namespace    string `json:"namespace,omitempty"`
-	Context      string `json:"context,omitempty"`
+
+	// Name is the specific name of the resource instance to retrieve.
+	Name string `json:"name"`
+
+	// APIVersion optionally constrains the search to a specific API version.
+	// If empty, searches across all available API versions.
+	APIVersion string `json:"api_version,omitempty"`
+
+	// Namespace specifies the target namespace for namespaced resources.
+	// Required for namespaced resources, leave empty for cluster-scoped resources.
+	Namespace string `json:"namespace,omitempty"`
+
+	// Context specifies which Kubernetes context to use for this operation.
+	// If empty, uses the current context from kubeconfig.
+	Context string `json:"context,omitempty"`
 }
 
+// GetResource implements the get_resource MCP tool.
+// It retrieves the complete configuration and status of a specific Kubernetes resource
+// by name and type. Returns the full resource object including all fields.
 func (h *ResourceHandler) GetResource(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	var params GetResourceParams
 	if err := request.BindArguments(&params); err != nil {
@@ -171,7 +223,10 @@ func (h *ResourceHandler) GetResource(ctx context.Context, request mcp.CallToolR
 	return response.JSON(resource.Object)
 }
 
-// extractResourceSummary extracts only metadata, apiVersion, and kind from a resource
+// extractResourceSummary extracts only essential fields from a resource for list operations.
+// It returns a lightweight summary containing just metadata, apiVersion, and kind,
+// which is sufficient for most listing and browsing operations while minimizing
+// response size and processing time.
 func extractResourceSummary(resource *unstructured.Unstructured) map[string]interface{} {
 	summary := make(map[string]interface{})
 
@@ -190,7 +245,9 @@ func extractResourceSummary(resource *unstructured.Unstructured) map[string]inte
 	return summary
 }
 
-// getCreationTime extracts creation timestamp from a resource summary
+// getCreationTime extracts the creation timestamp from a resource summary for sorting purposes.
+// It safely navigates the metadata structure and parses the RFC3339 timestamp format
+// used by Kubernetes. Returns false if the timestamp is missing or invalid.
 func getCreationTime(item map[string]interface{}) (time.Time, bool) {
 	metadata, ok := item["metadata"].(map[string]interface{})
 	if !ok {
@@ -210,17 +267,39 @@ func getCreationTime(item map[string]interface{}) (time.Time, bool) {
 	return t, true
 }
 
+// APIResource represents metadata about a Kubernetes API resource type.
+// It contains information about the resource's capabilities, naming conventions,
+// and supported operations, similar to the output of "kubectl api-resources".
 type APIResource struct {
-	Name         string   `json:"name"`
-	SingularName string   `json:"singularName"`
-	Namespaced   bool     `json:"namespaced"`
-	Kind         string   `json:"kind"`
-	Verbs        []string `json:"verbs"`
-	ShortNames   []string `json:"shortNames,omitempty"`
-	APIVersion   string   `json:"apiVersion"`
-	Categories   []string `json:"categories,omitempty"`
+	// Name is the plural name of the resource (e.g., "pods", "deployments").
+	Name string `json:"name"`
+
+	// SingularName is the singular form of the resource name (e.g., "pod", "deployment").
+	SingularName string `json:"singularName"`
+
+	// Namespaced indicates whether the resource is namespace-scoped or cluster-scoped.
+	Namespaced bool `json:"namespaced"`
+
+	// Kind is the resource kind used in YAML manifests (e.g., "Pod", "Deployment").
+	Kind string `json:"kind"`
+
+	// Verbs lists the supported operations for this resource (e.g., ["get", "list", "create"]).
+	Verbs []string `json:"verbs"`
+
+	// ShortNames contains abbreviated names for the resource (e.g., "po" for "pods").
+	ShortNames []string `json:"shortNames,omitempty"`
+
+	// APIVersion specifies the API group and version (e.g., "v1", "apps/v1").
+	APIVersion string `json:"apiVersion"`
+
+	// Categories groups resources into logical categories (e.g., "all").
+	Categories []string `json:"categories,omitempty"`
 }
 
+// ListAPIResources implements the list_api_resources MCP tool.
+// It discovers and returns information about all available Kubernetes API resources
+// in the cluster, similar to "kubectl api-resources". This is useful for understanding
+// what resource types are available and their capabilities.
 func (h *ResourceHandler) ListAPIResources(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	lists, err := h.client.DiscoverResources(ctx)
 	if err != nil {
@@ -265,14 +344,30 @@ func (h *ResourceHandler) ListAPIResources(ctx context.Context, request mcp.Call
 	return response.JSON(result)
 }
 
+// KubeContext represents a Kubernetes context from the kubeconfig file.
+// It contains the configuration needed to connect to a specific cluster
+// with specific user credentials and default namespace.
 type KubeContext struct {
-	Name      string `json:"name"`
-	Cluster   string `json:"cluster"`
-	User      string `json:"user"`
+	// Name is the context name as defined in the kubeconfig file.
+	Name string `json:"name"`
+
+	// Cluster refers to the cluster configuration section in kubeconfig.
+	Cluster string `json:"cluster"`
+
+	// User refers to the user credentials section in kubeconfig.
+	User string `json:"user"`
+
+	// Namespace is the default namespace for this context (if specified).
 	Namespace string `json:"namespace,omitempty"`
-	Current   bool   `json:"current"`
+
+	// Current indicates whether this is the currently active context.
+	Current bool `json:"current"`
 }
 
+// ListContexts implements the list_contexts MCP tool.
+// It reads the kubeconfig file and returns information about all available
+// Kubernetes contexts. This helps users understand what clusters and configurations
+// are available for use with the context parameter in other tools.
 func (h *ResourceHandler) ListContexts(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	contexts, err := h.listKubeContexts()
 	if err != nil {
@@ -287,6 +382,9 @@ func (h *ResourceHandler) ListContexts(ctx context.Context, request mcp.CallTool
 	return response.JSON(result)
 }
 
+// listKubeContexts reads and parses the kubeconfig file to extract context information.
+// It handles the same kubeconfig resolution logic as the Kubernetes client creation,
+// supporting explicit paths, environment variables, and default locations.
 func (h *ResourceHandler) listKubeContexts() ([]KubeContext, error) {
 	kubeconfig := h.baseConfig.Kubeconfig
 	if kubeconfig == "" {
@@ -340,7 +438,9 @@ func (h *ResourceHandler) listKubeContexts() ([]KubeContext, error) {
 	return contexts, nil
 }
 
-// GetTools returns all resource-related MCP tools
+// GetTools returns all resource-related MCP tools provided by this handler.
+// This includes tools for listing resources, getting specific resources,
+// discovering API resources, and managing Kubernetes contexts.
 func (h *ResourceHandler) GetTools() []MCPTool {
 	return []MCPTool{
 		NewMCPTool(

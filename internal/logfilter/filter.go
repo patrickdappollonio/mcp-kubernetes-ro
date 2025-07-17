@@ -1,3 +1,7 @@
+// Package logfilter provides functionality for filtering Kubernetes pod logs
+// with grep-like capabilities including pattern matching, regular expressions,
+// and time-based filtering. It supports both inclusion and exclusion patterns
+// for flexible log analysis.
 package logfilter
 
 import (
@@ -7,14 +11,37 @@ import (
 	"time"
 )
 
-// FilterOptions represents options for filtering log lines
+// FilterOptions represents the configuration for filtering log lines.
+// It supports both literal string matching and regular expression patterns,
+// with separate inclusion and exclusion filters that can be combined.
 type FilterOptions struct {
-	GrepInclude []string // Include patterns (like grep)
-	GrepExclude []string // Exclude patterns (like grep -v)
-	UseRegex    bool     // Whether to treat patterns as regular expressions
+	// GrepInclude contains patterns that lines must match to be included.
+	// Works like grep - only lines containing any of these patterns are kept.
+	// If empty, all lines are considered for inclusion (subject to exclusion).
+	GrepInclude []string
+
+	// GrepExclude contains patterns that exclude lines from the output.
+	// Works like grep -v - lines containing any of these patterns are removed.
+	// Applied after inclusion filtering.
+	GrepExclude []string
+
+	// UseRegex determines whether to treat patterns as regular expressions.
+	// If false, patterns are treated as literal strings for simple substring matching.
+	// If true, patterns are compiled as regular expressions for advanced matching.
+	UseRegex bool
 }
 
-// FilterLogs applies filtering options to log content and returns filtered lines
+// FilterLogs applies the specified filtering options to log content and returns filtered lines.
+// It processes the content line by line, applying inclusion and exclusion patterns
+// in sequence. Empty lines at the end are automatically removed.
+//
+// The filtering process:
+//  1. Split content into lines
+//  2. For each line, check inclusion patterns (if any)
+//  3. For each remaining line, check exclusion patterns (if any)
+//  4. Return the filtered content as a joined string
+//
+// Returns an error if regular expression patterns are invalid when UseRegex is true.
 func FilterLogs(content string, opts *FilterOptions) (string, error) {
 	if opts == nil {
 		return content, nil
@@ -107,6 +134,11 @@ func FilterLogs(content string, opts *FilterOptions) (string, error) {
 }
 
 // CountMatchingLines counts the number of lines that match the filter criteria
+// without returning the actual filtered content. This is useful for getting
+// statistics about log filtering results.
+//
+// Returns 0 if no lines match or if the content is empty after filtering.
+// Returns an error if the filter options contain invalid regular expressions.
 func CountMatchingLines(content string, opts *FilterOptions) (int, error) {
 	filtered, err := FilterLogs(content, opts)
 	if err != nil {
@@ -120,8 +152,23 @@ func CountMatchingLines(content string, opts *FilterOptions) (int, error) {
 	return len(strings.Split(filtered, "\n")), nil
 }
 
-// ParseSinceTime parses a "since" time string into a time.Time
-// Supports formats like: "5m", "1h", "2h30m", "1d", "2023-01-01T10:00:00Z"
+// ParseSinceTime parses a "since" time string into either an absolute time or relative duration.
+// It supports multiple time formats for flexible log retrieval:
+//
+// Duration formats (relative to now):
+//   - "5m" (5 minutes ago)
+//   - "1h" (1 hour ago)
+//   - "2h30m" (2 hours 30 minutes ago)
+//   - "1d" (1 day ago)
+//
+// Absolute time formats:
+//   - "2023-01-01T10:00:00Z" (RFC3339)
+//   - "2023-01-01T10:00:00" (without timezone)
+//   - "2023-01-01 10:00:00" (space separator)
+//   - "2023-01-01" (date only)
+//
+// Returns either a time.Time pointer for absolute times or an int64 pointer
+// for relative durations in seconds. Only one return value will be non-nil.
 func ParseSinceTime(since string) (*time.Time, *int64, error) {
 	if since == "" {
 		return nil, nil, nil
@@ -153,7 +200,9 @@ func ParseSinceTime(since string) (*time.Time, *int64, error) {
 	return nil, nil, fmt.Errorf("invalid since time format: %s", since)
 }
 
-// parseDuration parses extended duration strings including days
+// parseDuration extends the standard time.ParseDuration to support day notation.
+// It handles formats like "1d", "2d" by converting them to hour-based durations.
+// Falls back to standard duration parsing for other formats.
 func parseDuration(s string) (time.Duration, error) {
 	// Handle days notation (e.g., "1d", "2d")
 	if strings.HasSuffix(s, "d") {
@@ -167,7 +216,12 @@ func parseDuration(s string) (time.Duration, error) {
 	return time.ParseDuration(s)
 }
 
-// ValidateFilterOptions validates the filter options
+// ValidateFilterOptions validates the filter options for correctness.
+// It checks that regular expression patterns are valid when UseRegex is true,
+// preventing runtime errors during log filtering.
+//
+// Returns an error describing which pattern is invalid and why.
+// Returns nil if all options are valid or if opts is nil.
 func ValidateFilterOptions(opts *FilterOptions) error {
 	if opts == nil {
 		return nil
