@@ -14,11 +14,18 @@ import (
 	metricsv1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
 )
 
+// MetricsHandler provides MCP tools for retrieving Kubernetes node and pod metrics.
+// It requires the metrics-server to be installed and running in the cluster.
+// The handler supports both cluster-wide and targeted metrics retrieval with
+// client-side pagination for consistent ordering and performance.
 type MetricsHandler struct {
 	client     *kubernetes.Client
 	baseConfig *kubernetes.Config
 }
 
+// NewMetricsHandler creates a new MetricsHandler with the provided Kubernetes client
+// and base configuration. The base configuration provides default values that can
+// be overridden on a per-request basis.
 func NewMetricsHandler(client *kubernetes.Client, baseConfig *kubernetes.Config) *MetricsHandler {
 	return &MetricsHandler{
 		client:     client,
@@ -26,7 +33,9 @@ func NewMetricsHandler(client *kubernetes.Client, baseConfig *kubernetes.Config)
 	}
 }
 
-// isMetricsServerError checks if the error is related to metrics server not being available
+// isMetricsServerError checks if an error indicates that the metrics server is unavailable.
+// It recognizes common error patterns that occur when the metrics-server is not installed
+// or not responding, allowing for helpful error messages to be provided to users.
 func isMetricsServerError(err error) bool {
 	if err == nil {
 		return false
@@ -39,30 +48,64 @@ func isMetricsServerError(err error) bool {
 		strings.Contains(errStr, "unable to fetch metrics")
 }
 
-// formatMetricsServerError provides a helpful error message when metrics server is not available
+// formatMetricsServerError provides a helpful error message when the metrics server is unavailable.
+// It includes installation guidance to help users understand how to enable metrics functionality.
 func formatMetricsServerError(err error) string {
 	return fmt.Sprintf("Metrics server appears to be unavailable: %v\n\nYou might need to install the \"metrics-server\" in your cluster.", err)
 }
 
+// GetNodeMetricsParams defines the parameters for the get_node_metrics MCP tool.
+// It supports both cluster-wide metrics retrieval and targeted node metrics with pagination.
 type GetNodeMetricsParams struct {
+	// NodeName specifies a specific node to get metrics for.
+	// If empty, retrieves metrics for all nodes in the cluster.
 	NodeName string `json:"node_name,omitempty"`
-	Context  string `json:"context,omitempty"`
-	Limit    int    `json:"limit,omitempty"`
+
+	// Context specifies which Kubernetes context to use for this operation.
+	// If empty, uses the current context from kubeconfig.
+	Context string `json:"context,omitempty"`
+
+	// Limit restricts the maximum number of node metrics returned.
+	// If 0, returns all matching metrics.
+	Limit int `json:"limit,omitempty"`
+
+	// Continue is a pagination token from a previous response.
+	// Used to retrieve the next page of results.
 	Continue string `json:"continue,omitempty"`
 }
 
+// GetPodMetricsParams defines the parameters for the get_pod_metrics MCP tool.
+// It supports namespace-scoped, cluster-wide, and targeted pod metrics with pagination.
 type GetPodMetricsParams struct {
+	// Namespace specifies the target namespace for pod metrics.
+	// If empty, retrieves metrics for pods across all namespaces.
 	Namespace string `json:"namespace,omitempty"`
-	PodName   string `json:"pod_name,omitempty"`
-	Context   string `json:"context,omitempty"`
-	Limit     int    `json:"limit,omitempty"`
-	Continue  string `json:"continue,omitempty"`
+
+	// PodName specifies a specific pod to get metrics for.
+	// If provided, Namespace must also be specified.
+	PodName string `json:"pod_name,omitempty"`
+
+	// Context specifies which Kubernetes context to use for this operation.
+	// If empty, uses the current context from kubeconfig.
+	Context string `json:"context,omitempty"`
+
+	// Limit restricts the maximum number of pod metrics returned.
+	// If 0, returns all matching metrics.
+	Limit int `json:"limit,omitempty"`
+
+	// Continue is a pagination token from a previous response.
+	// Used to retrieve the next page of results.
+	Continue string `json:"continue,omitempty"`
 }
 
+// GetNodeMetrics implements the get_node_metrics MCP tool.
+// It retrieves CPU and memory usage metrics for cluster nodes from the metrics-server.
+// Supports both single-node queries and cluster-wide metrics with client-side pagination
+// for consistent ordering. Results are sorted by timestamp (newest first).
 func (h *MetricsHandler) GetNodeMetrics(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	var params GetNodeMetricsParams
 	if err := request.BindArguments(&params); err != nil {
-		return response.Error(fmt.Sprintf("failed to parse arguments: %v", err))
+		return response.Errorf("failed to parse arguments: %s", err)
 	}
 
 	// Use the appropriate client based on context
@@ -70,7 +113,7 @@ func (h *MetricsHandler) GetNodeMetrics(ctx context.Context, request mcp.CallToo
 	if params.Context != "" {
 		contextClient, err := kubernetes.NewClientWithContext(h.baseConfig, params.Context)
 		if err != nil {
-			return response.Error(fmt.Sprintf("failed to create client with context %s: %v", params.Context, err))
+			return response.Errorf("failed to create client with context %q: %s", params.Context, err)
 		}
 		client = contextClient
 	}
@@ -80,9 +123,9 @@ func (h *MetricsHandler) GetNodeMetrics(ctx context.Context, request mcp.CallToo
 		nodeMetrics, err := client.GetNodeMetricsByName(ctx, params.NodeName)
 		if err != nil {
 			if isMetricsServerError(err) {
-				return response.Error(formatMetricsServerError(err))
+				return response.Errorf("%s", formatMetricsServerError(err))
 			}
-			return response.Error(fmt.Sprintf("failed to get node metrics for %s: %v", params.NodeName, err))
+			return response.Errorf("failed to get node metrics for %s: %v", params.NodeName, err)
 		}
 
 		return response.JSON(nodeMetrics)
@@ -92,9 +135,9 @@ func (h *MetricsHandler) GetNodeMetrics(ctx context.Context, request mcp.CallToo
 	nodeMetricsList, err := client.GetNodeMetrics(ctx)
 	if err != nil {
 		if isMetricsServerError(err) {
-			return response.Error(formatMetricsServerError(err))
+			return response.Errorf("%s", formatMetricsServerError(err))
 		}
-		return response.Error(fmt.Sprintf("failed to get node metrics: %v", err))
+		return response.Errorf("failed to get node metrics: %v", err)
 	}
 
 	// Convert to interface slice for client-side pagination
@@ -115,7 +158,7 @@ func (h *MetricsHandler) GetNodeMetrics(ctx context.Context, request mcp.CallToo
 		// Parse continue token to get offset
 		paginationState, err := parseContinueToken(params.Continue)
 		if err != nil {
-			return response.Error(fmt.Sprintf("invalid continue token: %v", err))
+			return response.Errorf("invalid continue token: %v", err)
 		}
 
 		// Apply client-side pagination
@@ -148,10 +191,14 @@ func (h *MetricsHandler) GetNodeMetrics(ctx context.Context, request mcp.CallToo
 	return response.JSON(result)
 }
 
+// GetPodMetrics implements the get_pod_metrics MCP tool.
+// It retrieves CPU and memory usage metrics for cluster pods from the metrics-server.
+// Supports namespace-scoped, cluster-wide, and single-pod queries with client-side
+// pagination for consistent ordering. Results are sorted by timestamp (newest first).
 func (h *MetricsHandler) GetPodMetrics(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	var params GetPodMetricsParams
 	if err := request.BindArguments(&params); err != nil {
-		return response.Error(fmt.Sprintf("failed to parse arguments: %v", err))
+		return response.Errorf("failed to parse arguments: %s", err)
 	}
 
 	// Use the appropriate client based on context
@@ -159,7 +206,7 @@ func (h *MetricsHandler) GetPodMetrics(ctx context.Context, request mcp.CallTool
 	if params.Context != "" {
 		contextClient, err := kubernetes.NewClientWithContext(h.baseConfig, params.Context)
 		if err != nil {
-			return response.Error(fmt.Sprintf("failed to create client with context %s: %v", params.Context, err))
+			return response.Errorf("failed to create client with context %s: %v", params.Context, err)
 		}
 		client = contextClient
 	}
@@ -173,9 +220,9 @@ func (h *MetricsHandler) GetPodMetrics(ctx context.Context, request mcp.CallTool
 		podMetrics, err := client.GetPodMetricsByName(ctx, params.Namespace, params.PodName)
 		if err != nil {
 			if isMetricsServerError(err) {
-				return response.Error(formatMetricsServerError(err))
+				return response.Errorf("%s", formatMetricsServerError(err))
 			}
-			return response.Error(fmt.Sprintf("failed to get pod metrics for %s/%s: %v", params.Namespace, params.PodName, err))
+			return response.Errorf("failed to get pod metrics for %s/%s: %v", params.Namespace, params.PodName, err)
 		}
 
 		return response.JSON(podMetrics)
@@ -195,9 +242,9 @@ func (h *MetricsHandler) GetPodMetrics(ctx context.Context, request mcp.CallTool
 
 	if err != nil {
 		if isMetricsServerError(err) {
-			return response.Error(formatMetricsServerError(err))
+			return response.Errorf("%s", formatMetricsServerError(err))
 		}
-		return response.Error(fmt.Sprintf("failed to get pod metrics: %v", err))
+		return response.Errorf("failed to get pod metrics: %v", err)
 	}
 
 	// Convert to interface slice for client-side pagination
@@ -218,7 +265,7 @@ func (h *MetricsHandler) GetPodMetrics(ctx context.Context, request mcp.CallTool
 		// Parse continue token to get offset
 		paginationState, err := parseContinueToken(params.Continue)
 		if err != nil {
-			return response.Error(fmt.Sprintf("invalid continue token: %v", err))
+			return response.Errorf("invalid continue token: %v", err)
 		}
 
 		// Validate that the continue token is for the same request type
@@ -314,4 +361,51 @@ func paginateItems(items []interface{}, limit int, offset int) ([]interface{}, b
 	}
 
 	return items[offset:end], hasMore
+}
+
+// GetTools returns all metrics-related MCP tools provided by this handler.
+// This includes tools for retrieving node and pod CPU/memory metrics from
+// the metrics-server with support for filtering and pagination.
+func (h *MetricsHandler) GetTools() []MCPTool {
+	return []MCPTool{
+		NewMCPTool(
+			mcp.NewTool("get_node_metrics",
+				mcp.WithDescription("Get node metrics (CPU and memory usage)"),
+				mcp.WithString("node_name",
+					mcp.Description("Specific node name to get metrics for (optional - if not provided, returns metrics for all nodes)"),
+				),
+				mcp.WithString("context",
+					mcp.Description("Kubernetes context to use (defaults to current context from kubeconfig)"),
+				),
+				mcp.WithNumber("limit",
+					mcp.Description("Maximum number of node metrics to return (optional - defaults to all)"),
+				),
+				mcp.WithString("continue",
+					mcp.Description("Continue token for pagination (optional - from previous response)"),
+				),
+			),
+			h.GetNodeMetrics,
+		),
+		NewMCPTool(
+			mcp.NewTool("get_pod_metrics",
+				mcp.WithDescription("Get pod metrics (CPU and memory usage)"),
+				mcp.WithString("namespace",
+					mcp.Description("Namespace to get pod metrics from (optional - if not provided, returns metrics for all pods)"),
+				),
+				mcp.WithString("pod_name",
+					mcp.Description("Specific pod name to get metrics for (optional - if not provided, returns metrics for all pods in namespace or cluster)"),
+				),
+				mcp.WithString("context",
+					mcp.Description("Kubernetes context to use (defaults to current context from kubeconfig)"),
+				),
+				mcp.WithNumber("limit",
+					mcp.Description("Maximum number of pod metrics to return (optional - defaults to all)"),
+				),
+				mcp.WithString("continue",
+					mcp.Description("Continue token for pagination (optional - from previous response)"),
+				),
+			),
+			h.GetPodMetrics,
+		),
+	}
 }
