@@ -32,7 +32,7 @@ func FilterLogs(content string, opts *FilterOptions) (string, error) {
 		for _, pattern := range opts.GrepInclude {
 			re, err := regexp.Compile(pattern)
 			if err != nil {
-				return "", fmt.Errorf("invalid include regex pattern '%s': %w", pattern, err)
+				return "", fmt.Errorf("invalid include regex pattern %q: %w", pattern, err)
 			}
 			includePatterns = append(includePatterns, re)
 		}
@@ -41,7 +41,7 @@ func FilterLogs(content string, opts *FilterOptions) (string, error) {
 		for _, pattern := range opts.GrepExclude {
 			re, err := regexp.Compile(pattern)
 			if err != nil {
-				return "", fmt.Errorf("invalid exclude regex pattern '%s': %w", pattern, err)
+				return "", fmt.Errorf("invalid exclude regex pattern %q: %w", pattern, err)
 			}
 			excludePatterns = append(excludePatterns, re)
 		}
@@ -177,12 +177,12 @@ func ValidateFilterOptions(opts *FilterOptions) error {
 	if opts.UseRegex {
 		for _, pattern := range opts.GrepInclude {
 			if _, err := regexp.Compile(pattern); err != nil {
-				return fmt.Errorf("invalid include regex pattern '%s': %w", pattern, err)
+				return fmt.Errorf("invalid include regex pattern %q: %w", pattern, err)
 			}
 		}
 		for _, pattern := range opts.GrepExclude {
 			if _, err := regexp.Compile(pattern); err != nil {
-				return fmt.Errorf("invalid exclude regex pattern '%s': %w", pattern, err)
+				return fmt.Errorf("invalid exclude regex pattern %q: %w", pattern, err)
 			}
 		}
 	}

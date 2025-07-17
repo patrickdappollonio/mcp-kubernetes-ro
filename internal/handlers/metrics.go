@@ -62,7 +62,7 @@ type GetPodMetricsParams struct {
 func (h *MetricsHandler) GetNodeMetrics(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	var params GetNodeMetricsParams
 	if err := request.BindArguments(&params); err != nil {
-		return response.Error(fmt.Sprintf("failed to parse arguments: %v", err))
+		return response.Errorf("failed to parse arguments: %s", err)
 	}
 
 	// Use the appropriate client based on context
@@ -70,7 +70,7 @@ func (h *MetricsHandler) GetNodeMetrics(ctx context.Context, request mcp.CallToo
 	if params.Context != "" {
 		contextClient, err := kubernetes.NewClientWithContext(h.baseConfig, params.Context)
 		if err != nil {
-			return response.Error(fmt.Sprintf("failed to create client with context %s: %v", params.Context, err))
+			return response.Errorf("failed to create client with context %q: %s", params.Context, err)
 		}
 		client = contextClient
 	}
@@ -80,9 +80,9 @@ func (h *MetricsHandler) GetNodeMetrics(ctx context.Context, request mcp.CallToo
 		nodeMetrics, err := client.GetNodeMetricsByName(ctx, params.NodeName)
 		if err != nil {
 			if isMetricsServerError(err) {
-				return response.Error(formatMetricsServerError(err))
+				return response.Errorf("%s", formatMetricsServerError(err))
 			}
-			return response.Error(fmt.Sprintf("failed to get node metrics for %s: %v", params.NodeName, err))
+			return response.Errorf("failed to get node metrics for %s: %v", params.NodeName, err)
 		}
 
 		return response.JSON(nodeMetrics)
@@ -92,9 +92,9 @@ func (h *MetricsHandler) GetNodeMetrics(ctx context.Context, request mcp.CallToo
 	nodeMetricsList, err := client.GetNodeMetrics(ctx)
 	if err != nil {
 		if isMetricsServerError(err) {
-			return response.Error(formatMetricsServerError(err))
+			return response.Errorf("%s", formatMetricsServerError(err))
 		}
-		return response.Error(fmt.Sprintf("failed to get node metrics: %v", err))
+		return response.Errorf("failed to get node metrics: %v", err)
 	}
 
 	// Convert to interface slice for client-side pagination
@@ -115,7 +115,7 @@ func (h *MetricsHandler) GetNodeMetrics(ctx context.Context, request mcp.CallToo
 		// Parse continue token to get offset
 		paginationState, err := parseContinueToken(params.Continue)
 		if err != nil {
-			return response.Error(fmt.Sprintf("invalid continue token: %v", err))
+			return response.Errorf("invalid continue token: %v", err)
 		}
 
 		// Apply client-side pagination
@@ -151,7 +151,7 @@ func (h *MetricsHandler) GetNodeMetrics(ctx context.Context, request mcp.CallToo
 func (h *MetricsHandler) GetPodMetrics(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	var params GetPodMetricsParams
 	if err := request.BindArguments(&params); err != nil {
-		return response.Error(fmt.Sprintf("failed to parse arguments: %v", err))
+		return response.Errorf("failed to parse arguments: %s", err)
 	}
 
 	// Use the appropriate client based on context
@@ -159,7 +159,7 @@ func (h *MetricsHandler) GetPodMetrics(ctx context.Context, request mcp.CallTool
 	if params.Context != "" {
 		contextClient, err := kubernetes.NewClientWithContext(h.baseConfig, params.Context)
 		if err != nil {
-			return response.Error(fmt.Sprintf("failed to create client with context %s: %v", params.Context, err))
+			return response.Errorf("failed to create client with context %s: %v", params.Context, err)
 		}
 		client = contextClient
 	}
@@ -173,9 +173,9 @@ func (h *MetricsHandler) GetPodMetrics(ctx context.Context, request mcp.CallTool
 		podMetrics, err := client.GetPodMetricsByName(ctx, params.Namespace, params.PodName)
 		if err != nil {
 			if isMetricsServerError(err) {
-				return response.Error(formatMetricsServerError(err))
+				return response.Errorf("%s", formatMetricsServerError(err))
 			}
-			return response.Error(fmt.Sprintf("failed to get pod metrics for %s/%s: %v", params.Namespace, params.PodName, err))
+			return response.Errorf("failed to get pod metrics for %s/%s: %v", params.Namespace, params.PodName, err)
 		}
 
 		return response.JSON(podMetrics)
@@ -195,9 +195,9 @@ func (h *MetricsHandler) GetPodMetrics(ctx context.Context, request mcp.CallTool
 
 	if err != nil {
 		if isMetricsServerError(err) {
-			return response.Error(formatMetricsServerError(err))
+			return response.Errorf("%s", formatMetricsServerError(err))
 		}
-		return response.Error(fmt.Sprintf("failed to get pod metrics: %v", err))
+		return response.Errorf("failed to get pod metrics: %v", err)
 	}
 
 	// Convert to interface slice for client-side pagination
@@ -218,7 +218,7 @@ func (h *MetricsHandler) GetPodMetrics(ctx context.Context, request mcp.CallTool
 		// Parse continue token to get offset
 		paginationState, err := parseContinueToken(params.Continue)
 		if err != nil {
-			return response.Error(fmt.Sprintf("invalid continue token: %v", err))
+			return response.Errorf("invalid continue token: %v", err)
 		}
 
 		// Validate that the continue token is for the same request type

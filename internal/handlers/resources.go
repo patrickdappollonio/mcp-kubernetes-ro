@@ -46,7 +46,7 @@ type ListResourcesParams struct {
 func (h *ResourceHandler) ListResources(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	var params ListResourcesParams
 	if err := request.BindArguments(&params); err != nil {
-		return response.Error(fmt.Sprintf("failed to parse arguments: %v", err))
+		return response.Errorf("failed to parse arguments: %s", err)
 	}
 
 	if params.ResourceType == "" {
@@ -58,14 +58,14 @@ func (h *ResourceHandler) ListResources(ctx context.Context, request mcp.CallToo
 	if params.Context != "" {
 		contextClient, err := kubernetes.NewClientWithContext(h.baseConfig, params.Context)
 		if err != nil {
-			return response.Error(fmt.Sprintf("failed to create client with context %s: %v", params.Context, err))
+			return response.Errorf("failed to create client with context %s: %v", params.Context, err)
 		}
 		client = contextClient
 	}
 
 	gvr, err := client.ResolveResourceType(params.ResourceType, params.APIVersion)
 	if err != nil {
-		return response.Error(fmt.Sprintf("failed to resolve resource type: %v", err))
+		return response.Errorf("failed to resolve resource type: %v", err)
 	}
 
 	listOptions := metav1.ListOptions{
@@ -80,7 +80,7 @@ func (h *ResourceHandler) ListResources(ctx context.Context, request mcp.CallToo
 
 	resources, err := client.ListResources(ctx, gvr, params.Namespace, listOptions)
 	if err != nil {
-		return response.Error(fmt.Sprintf("failed to list resources: %v", err))
+		return response.Errorf("failed to list resources: %v", err)
 	}
 
 	// Extract metadata-only resource summaries
@@ -137,7 +137,7 @@ type GetResourceParams struct {
 func (h *ResourceHandler) GetResource(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	var params GetResourceParams
 	if err := request.BindArguments(&params); err != nil {
-		return response.Error(fmt.Sprintf("failed to parse arguments: %v", err))
+		return response.Errorf("failed to parse arguments: %s", err)
 	}
 
 	if params.ResourceType == "" {
@@ -153,19 +153,19 @@ func (h *ResourceHandler) GetResource(ctx context.Context, request mcp.CallToolR
 	if params.Context != "" {
 		contextClient, err := kubernetes.NewClientWithContext(h.baseConfig, params.Context)
 		if err != nil {
-			return response.Error(fmt.Sprintf("failed to create client with context %s: %v", params.Context, err))
+			return response.Errorf("failed to create client with context %s: %v", params.Context, err)
 		}
 		client = contextClient
 	}
 
 	gvr, err := client.ResolveResourceType(params.ResourceType, params.APIVersion)
 	if err != nil {
-		return response.Error(fmt.Sprintf("failed to resolve resource type: %v", err))
+		return response.Errorf("failed to resolve resource type: %v", err)
 	}
 
 	resource, err := client.GetResource(ctx, gvr, params.Namespace, params.Name)
 	if err != nil {
-		return response.Error(fmt.Sprintf("failed to get resource: %v", err))
+		return response.Errorf("failed to get resource: %v", err)
 	}
 
 	return response.JSON(resource.Object)
@@ -224,7 +224,7 @@ type APIResource struct {
 func (h *ResourceHandler) ListAPIResources(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	lists, err := h.client.DiscoverResources(ctx)
 	if err != nil {
-		return response.Error(fmt.Sprintf("failed to discover API resources: %v", err))
+		return response.Errorf("failed to discover API resources: %v", err)
 	}
 
 	var resources []APIResource
@@ -276,7 +276,7 @@ type KubeContext struct {
 func (h *ResourceHandler) ListContexts(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	contexts, err := h.listKubeContexts()
 	if err != nil {
-		return response.Error(fmt.Sprintf("failed to list contexts: %v", err))
+		return response.Errorf("failed to list contexts: %v", err)
 	}
 
 	result := map[string]interface{}{

@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"encoding/base64"
-	"fmt"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/patrickdappollonio/mcp-kubernetes-ro/internal/response"
@@ -26,7 +25,7 @@ type DecodeBase64Params struct {
 func (h *UtilsHandler) EncodeBase64(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	var params EncodeBase64Params
 	if err := request.BindArguments(&params); err != nil {
-		return response.Error(fmt.Sprintf("failed to parse arguments: %v", err))
+		return response.Errorf("failed to parse arguments: %s", err)
 	}
 
 	if params.Data == "" {
@@ -46,7 +45,7 @@ func (h *UtilsHandler) EncodeBase64(ctx context.Context, request mcp.CallToolReq
 func (h *UtilsHandler) DecodeBase64(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	var params DecodeBase64Params
 	if err := request.BindArguments(&params); err != nil {
-		return response.Error(fmt.Sprintf("failed to parse arguments: %v", err))
+		return response.Errorf("failed to parse arguments: %s", err)
 	}
 
 	if params.Data == "" {
@@ -55,10 +54,10 @@ func (h *UtilsHandler) DecodeBase64(ctx context.Context, request mcp.CallToolReq
 
 	decoded, err := base64.StdEncoding.DecodeString(params.Data)
 	if err != nil {
-		return response.Error(fmt.Sprintf("failed to decode base64 data: %v", err))
+		return response.Errorf("failed to decode base64 data: %s", err)
 	}
 
-	result := map[string]interface{}{
+	result := map[string]any{
 		"original": params.Data,
 		"decoded":  string(decoded),
 	}

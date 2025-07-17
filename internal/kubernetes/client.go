@@ -251,14 +251,6 @@ func (c *Client) ResolveResourceType(resourceType, apiVersion string) (schema.Gr
 	return schema.GroupVersionResource{}, errors.New(errorMsg)
 }
 
-// min returns the minimum of two integers
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 // LogOptions represents options for retrieving pod logs
 type LogOptions struct {
 	Container    string
