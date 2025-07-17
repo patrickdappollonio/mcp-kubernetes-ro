@@ -315,3 +315,48 @@ func paginateItems(items []interface{}, limit int, offset int) ([]interface{}, b
 
 	return items[offset:end], hasMore
 }
+
+// GetTools returns all metrics-related MCP tools
+func (h *MetricsHandler) GetTools() []MCPTool {
+	return []MCPTool{
+		NewMCPTool(
+			mcp.NewTool("get_node_metrics",
+				mcp.WithDescription("Get node metrics (CPU and memory usage)"),
+				mcp.WithString("node_name",
+					mcp.Description("Specific node name to get metrics for (optional - if not provided, returns metrics for all nodes)"),
+				),
+				mcp.WithString("context",
+					mcp.Description("Kubernetes context to use (defaults to current context from kubeconfig)"),
+				),
+				mcp.WithNumber("limit",
+					mcp.Description("Maximum number of node metrics to return (optional - defaults to all)"),
+				),
+				mcp.WithString("continue",
+					mcp.Description("Continue token for pagination (optional - from previous response)"),
+				),
+			),
+			h.GetNodeMetrics,
+		),
+		NewMCPTool(
+			mcp.NewTool("get_pod_metrics",
+				mcp.WithDescription("Get pod metrics (CPU and memory usage)"),
+				mcp.WithString("namespace",
+					mcp.Description("Namespace to get pod metrics from (optional - if not provided, returns metrics for all pods)"),
+				),
+				mcp.WithString("pod_name",
+					mcp.Description("Specific pod name to get metrics for (optional - if not provided, returns metrics for all pods in namespace or cluster)"),
+				),
+				mcp.WithString("context",
+					mcp.Description("Kubernetes context to use (defaults to current context from kubeconfig)"),
+				),
+				mcp.WithNumber("limit",
+					mcp.Description("Maximum number of pod metrics to return (optional - defaults to all)"),
+				),
+				mcp.WithString("continue",
+					mcp.Description("Continue token for pagination (optional - from previous response)"),
+				),
+			),
+			h.GetPodMetrics,
+		),
+	}
+}

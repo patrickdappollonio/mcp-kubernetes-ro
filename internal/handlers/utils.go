@@ -55,13 +55,39 @@ func (h *UtilsHandler) DecodeBase64(ctx context.Context, request mcp.CallToolReq
 
 	decoded, err := base64.StdEncoding.DecodeString(params.Data)
 	if err != nil {
-		return response.Error(fmt.Sprintf("failed to decode base64: %v", err))
+		return response.Error(fmt.Sprintf("failed to decode base64 data: %v", err))
 	}
 
 	result := map[string]interface{}{
-		"encoded": params.Data,
-		"decoded": string(decoded),
+		"original": params.Data,
+		"decoded":  string(decoded),
 	}
 
 	return response.JSON(result)
+}
+
+// GetTools returns all utils-related MCP tools
+func (h *UtilsHandler) GetTools() []MCPTool {
+	return []MCPTool{
+		NewMCPTool(
+			mcp.NewTool("encode_base64",
+				mcp.WithDescription("Encode text data to base64 format"),
+				mcp.WithString("data",
+					mcp.Required(),
+					mcp.Description("Text data to encode"),
+				),
+			),
+			h.EncodeBase64,
+		),
+		NewMCPTool(
+			mcp.NewTool("decode_base64",
+				mcp.WithDescription("Decode base64 data to text format"),
+				mcp.WithString("data",
+					mcp.Required(),
+					mcp.Description("Base64 data to decode"),
+				),
+			),
+			h.DecodeBase64,
+		),
+	}
 }

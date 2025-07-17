@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/patrickdappollonio/mcp-kubernetes-ro/internal/handlers"
 	"github.com/patrickdappollonio/mcp-kubernetes-ro/internal/kubernetes"
@@ -60,176 +59,19 @@ func main() {
 		),
 	)
 
-	listResourcesTool := mcp.NewTool("list_resources",
-		mcp.WithDescription("List any Kubernetes resources by type with optional filtering, sorted newest first. Returns only metadata, apiVersion, and kind for lightweight responses. Use get_resource for full resource details. If you need a list of all resources, use the list_api_resources tool."),
-		mcp.WithString("resource_type",
-			mcp.Required(),
-			mcp.Description("The type of resource to list - use plural form (e.g., \"pods\", \"deployments\", \"services\")"),
-		),
-		mcp.WithString("api_version",
-			mcp.Description("API version for the resource (e.g., \"v1\", \"apps/v1\")"),
-		),
-		mcp.WithString("namespace",
-			mcp.Description("Target namespace (leave empty for cluster-scoped resources)"),
-		),
-		mcp.WithString("context",
-			mcp.Description("Kubernetes context to use (defaults to current context from kubeconfig)"),
-		),
-		mcp.WithString("label_selector",
-			mcp.Description("Label selector to filter resources (e.g., \"app=nginx,version=1.0\")"),
-		),
-		mcp.WithString("field_selector",
-			mcp.Description("Field selector to filter resources (e.g., \"status.phase=Running\")"),
-		),
-		mcp.WithNumber("limit",
-			mcp.Description("Maximum number of resources to return (defaults to all)"),
-		),
-		mcp.WithString("continue",
-			mcp.Description("Continue token for pagination (from previous response)"),
-		),
-	)
+	// Register all tools from handlers
+	allHandlers := []handlers.ToolRegistrator{
+		resourceHandler,
+		logHandler,
+		metricsHandler,
+		utilsHandler,
+	}
 
-	getResourceTool := mcp.NewTool("get_resource",
-		mcp.WithDescription("Get specific resource details"),
-		mcp.WithString("resource_type",
-			mcp.Required(),
-			mcp.Description("The type of resource to get"),
-		),
-		mcp.WithString("name",
-			mcp.Required(),
-			mcp.Description("Resource name"),
-		),
-		mcp.WithString("api_version",
-			mcp.Description("API version for the resource (e.g., \"v1\", \"apps/v1\")"),
-		),
-		mcp.WithString("namespace",
-			mcp.Description("Target namespace (required for namespaced resources)"),
-		),
-		mcp.WithString("context",
-			mcp.Description("Kubernetes context to use (defaults to current context from kubeconfig)"),
-		),
-	)
-
-	getLogsTool := mcp.NewTool("get_logs",
-		mcp.WithDescription("Get pod logs with advanced filtering options including grep patterns, time filtering, and previous logs"),
-		mcp.WithString("namespace",
-			mcp.Required(),
-			mcp.Description("Pod namespace"),
-		),
-		mcp.WithString("name",
-			mcp.Required(),
-			mcp.Description("Pod name"),
-		),
-		mcp.WithString("container",
-			mcp.Description("Container name (required for multi-container pods)"),
-		),
-		mcp.WithString("context",
-			mcp.Description("Kubernetes context to use (defaults to current context from kubeconfig)"),
-		),
-		mcp.WithString("max_lines",
-			mcp.Description("Maximum number of lines to retrieve"),
-		),
-		mcp.WithString("grep_include",
-			mcp.Description("Include only lines matching these patterns (comma-separated). Works like grep - includes lines containing any of these patterns"),
-		),
-		mcp.WithString("grep_exclude",
-			mcp.Description("Exclude lines matching these patterns (comma-separated). Works like grep -v - excludes lines containing any of these patterns"),
-		),
-		mcp.WithBoolean("use_regex",
-			mcp.Description("Whether to treat grep patterns as regular expressions instead of literal strings"),
-		),
-		mcp.WithString("since",
-			mcp.Description("Return logs newer than this time. Supports durations like \"5m\", \"1h\", \"2h30m\", \"1d\" or absolute times like \"2023-01-01T10:00:00Z\""),
-		),
-		mcp.WithBoolean("previous",
-			mcp.Description("Return logs from the previous terminated container instance (like kubectl logs --previous)"),
-		),
-	)
-
-	getPodContainersTool := mcp.NewTool("get_pod_containers",
-		mcp.WithDescription("List containers in a pod for log access"),
-		mcp.WithString("namespace",
-			mcp.Required(),
-			mcp.Description("Pod namespace"),
-		),
-		mcp.WithString("name",
-			mcp.Required(),
-			mcp.Description("Pod name"),
-		),
-		mcp.WithString("context",
-			mcp.Description("Kubernetes context to use (defaults to current context from kubeconfig)"),
-		),
-	)
-
-	listAPIResourcesTool := mcp.NewTool("list_api_resources",
-		mcp.WithDescription("List available Kubernetes API resources with their details (similar to kubectl api-resources)"),
-	)
-
-	listContextsTool := mcp.NewTool("list_contexts",
-		mcp.WithDescription("List available Kubernetes contexts from the kubeconfig file"),
-	)
-
-	encodeBase64Tool := mcp.NewTool("encode_base64",
-		mcp.WithDescription("Encode text data to base64 format"),
-		mcp.WithString("data",
-			mcp.Required(),
-			mcp.Description("Text data to encode"),
-		),
-	)
-
-	decodeBase64Tool := mcp.NewTool("decode_base64",
-		mcp.WithDescription("Decode base64 data to text format"),
-		mcp.WithString("data",
-			mcp.Required(),
-			mcp.Description("Base64 data to decode"),
-		),
-	)
-
-	getNodeMetricsTool := mcp.NewTool("get_node_metrics",
-		mcp.WithDescription("Get node metrics (CPU and memory usage)"),
-		mcp.WithString("node_name",
-			mcp.Description("Specific node name to get metrics for (optional - if not provided, returns metrics for all nodes)"),
-		),
-		mcp.WithString("context",
-			mcp.Description("Kubernetes context to use (defaults to current context from kubeconfig)"),
-		),
-		mcp.WithNumber("limit",
-			mcp.Description("Maximum number of node metrics to return (optional - defaults to all)"),
-		),
-		mcp.WithString("continue",
-			mcp.Description("Continue token for pagination (optional - from previous response)"),
-		),
-	)
-
-	getPodMetricsTool := mcp.NewTool("get_pod_metrics",
-		mcp.WithDescription("Get pod metrics (CPU and memory usage)"),
-		mcp.WithString("namespace",
-			mcp.Description("Namespace to get pod metrics from (optional - if not provided, returns metrics for all pods)"),
-		),
-		mcp.WithString("pod_name",
-			mcp.Description("Specific pod name to get metrics for (optional - if not provided, returns metrics for all pods in namespace or cluster)"),
-		),
-		mcp.WithString("context",
-			mcp.Description("Kubernetes context to use (defaults to current context from kubeconfig)"),
-		),
-		mcp.WithNumber("limit",
-			mcp.Description("Maximum number of pod metrics to return (optional - defaults to all)"),
-		),
-		mcp.WithString("continue",
-			mcp.Description("Continue token for pagination (optional - from previous response)"),
-		),
-	)
-
-	s.AddTool(listResourcesTool, resourceHandler.ListResources)
-	s.AddTool(getResourceTool, resourceHandler.GetResource)
-	s.AddTool(getLogsTool, logHandler.GetLogs)
-	s.AddTool(getPodContainersTool, logHandler.GetPodContainers)
-	s.AddTool(listAPIResourcesTool, resourceHandler.ListAPIResources)
-	s.AddTool(listContextsTool, resourceHandler.ListContexts)
-	s.AddTool(getNodeMetricsTool, metricsHandler.GetNodeMetrics)
-	s.AddTool(getPodMetricsTool, metricsHandler.GetPodMetrics)
-	s.AddTool(encodeBase64Tool, utilsHandler.EncodeBase64)
-	s.AddTool(decodeBase64Tool, utilsHandler.DecodeBase64)
+	for _, handler := range allHandlers {
+		for _, mcpTool := range handler.GetTools() {
+			s.AddTool(mcpTool.Tool(), mcpTool.Handler())
+		}
+	}
 
 	switch *transport {
 	case "stdio":

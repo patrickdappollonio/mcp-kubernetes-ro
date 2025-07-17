@@ -2,10 +2,13 @@ package kubernetes
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -148,26 +151,112 @@ func (c *Client) ResolveResourceType(resourceType, apiVersion string) (schema.Gr
 		return schema.GroupVersionResource{}, fmt.Errorf("failed to discover resources: %w", err)
 	}
 
+	// Build a comprehensive mapping of all possible names to their resource info
+	type resourceInfo struct {
+		gvr        schema.GroupVersionResource
+		apiVersion string
+	}
+
+	nameToResource := make(map[string]resourceInfo)
+	var allResourceNames []string
+
 	for _, list := range lists {
+		// Skip if API version is specified and doesn't match
 		if apiVersion != "" && list.GroupVersion != apiVersion {
 			continue
 		}
 
+		gv, err := schema.ParseGroupVersion(list.GroupVersion)
+		if err != nil {
+			continue
+		}
+
 		for _, resource := range list.APIResources {
-			if resource.Name == resourceType || resource.Kind == resourceType {
-				gv, err := schema.ParseGroupVersion(list.GroupVersion)
-				if err != nil {
-					continue
+			// Skip subresources (those with '/' in the name)
+			if strings.Contains(resource.Name, "/") {
+				continue
+			}
+
+			gvr := gv.WithResource(resource.Name)
+			info := resourceInfo{
+				gvr:        gvr,
+				apiVersion: list.GroupVersion,
+			}
+
+			// Map all possible names (case-insensitive)
+			names := []string{
+				resource.Name,         // plural name (e.g., "pods")
+				resource.SingularName, // singular name (e.g., "pod")
+				resource.Kind,         // kind (e.g., "Pod")
+			}
+
+			// Add short names
+			names = append(names, resource.ShortNames...)
+
+			for _, name := range names {
+				if name != "" {
+					lowerName := strings.ToLower(name)
+
+					// Prefer exact API version match over others
+					if existing, exists := nameToResource[lowerName]; !exists ||
+						(apiVersion != "" && existing.apiVersion != apiVersion && info.apiVersion == apiVersion) {
+						nameToResource[lowerName] = info
+					}
+
+					// Collect for error message (only from specified API version or all if none specified)
+					if apiVersion == "" || list.GroupVersion == apiVersion {
+						allResourceNames = append(allResourceNames, name)
+					}
 				}
-				return gv.WithResource(resource.Name), nil
 			}
 		}
 	}
 
-	if apiVersion != "" {
-		return schema.GroupVersionResource{}, fmt.Errorf("resource type %q not found in API version %q", resourceType, apiVersion)
+	// Look up the resource type (case-insensitive)
+	if info, found := nameToResource[strings.ToLower(resourceType)]; found {
+		return info.gvr, nil
 	}
-	return schema.GroupVersionResource{}, fmt.Errorf("resource type %q not found in any available API version", resourceType)
+
+	// Resource not found - provide helpful error message
+	errorMsg := fmt.Sprintf("resource type %q not found", resourceType)
+	if apiVersion != "" {
+		errorMsg += fmt.Sprintf(" in API version %q", apiVersion)
+	} else {
+		errorMsg += " in any available API version"
+	}
+
+	if len(allResourceNames) > 0 {
+		// Remove duplicates and sort for better readability
+		uniqueNames := make(map[string]bool)
+		for _, name := range allResourceNames {
+			uniqueNames[name] = true
+		}
+
+		var sortedNames []string
+		for name := range uniqueNames {
+			sortedNames = append(sortedNames, name)
+		}
+
+		// Sort the names for consistent, readable output
+		sort.Strings(sortedNames)
+
+		if len(sortedNames) > 10 {
+			sortedNames = sortedNames[:10]
+			errorMsg += fmt.Sprintf(". Available resource types include: %v (and %d more)", sortedNames, len(uniqueNames)-10)
+		} else {
+			errorMsg += fmt.Sprintf(". Available resource types include: %v", sortedNames)
+		}
+	}
+
+	return schema.GroupVersionResource{}, errors.New(errorMsg)
+}
+
+// min returns the minimum of two integers
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // LogOptions represents options for retrieving pod logs

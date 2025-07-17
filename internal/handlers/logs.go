@@ -176,11 +176,68 @@ func (h *LogHandler) GetPodContainers(ctx context.Context, request mcp.CallToolR
 		return nil, fmt.Errorf("failed to get pod containers: %w", err)
 	}
 
-	responseData := map[string]interface{}{
-		"namespace":  params.Namespace,
-		"pod":        params.Name,
+	return response.JSON(map[string]interface{}{
 		"containers": containers,
-	}
+	})
+}
 
-	return response.JSON(responseData)
+// GetTools returns all log-related MCP tools
+func (h *LogHandler) GetTools() []MCPTool {
+	return []MCPTool{
+		NewMCPTool(
+			mcp.NewTool("get_logs",
+				mcp.WithDescription("Get pod logs with advanced filtering options including grep patterns, time filtering, and previous logs"),
+				mcp.WithString("namespace",
+					mcp.Required(),
+					mcp.Description("Pod namespace"),
+				),
+				mcp.WithString("name",
+					mcp.Required(),
+					mcp.Description("Pod name"),
+				),
+				mcp.WithString("container",
+					mcp.Description("Container name (required for multi-container pods)"),
+				),
+				mcp.WithString("context",
+					mcp.Description("Kubernetes context to use (defaults to current context from kubeconfig)"),
+				),
+				mcp.WithString("max_lines",
+					mcp.Description("Maximum number of lines to retrieve"),
+				),
+				mcp.WithString("grep_include",
+					mcp.Description("Include only lines matching these patterns (comma-separated). Works like grep - includes lines containing any of these patterns"),
+				),
+				mcp.WithString("grep_exclude",
+					mcp.Description("Exclude lines matching these patterns (comma-separated). Works like grep -v - excludes lines containing any of these patterns"),
+				),
+				mcp.WithBoolean("use_regex",
+					mcp.Description("Whether to treat grep patterns as regular expressions instead of literal strings"),
+				),
+				mcp.WithString("since",
+					mcp.Description("Return logs newer than this time. Supports durations like \"5m\", \"1h\", \"2h30m\", \"1d\" or absolute times like \"2023-01-01T10:00:00Z\""),
+				),
+				mcp.WithBoolean("previous",
+					mcp.Description("Return logs from the previous terminated container instance (like kubectl logs --previous)"),
+				),
+			),
+			h.GetLogs,
+		),
+		NewMCPTool(
+			mcp.NewTool("get_pod_containers",
+				mcp.WithDescription("List containers in a pod for log access"),
+				mcp.WithString("namespace",
+					mcp.Required(),
+					mcp.Description("Pod namespace"),
+				),
+				mcp.WithString("name",
+					mcp.Required(),
+					mcp.Description("Pod name"),
+				),
+				mcp.WithString("context",
+					mcp.Description("Kubernetes context to use (defaults to current context from kubeconfig)"),
+				),
+			),
+			h.GetPodContainers,
+		),
+	}
 }
