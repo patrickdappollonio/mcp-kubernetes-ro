@@ -83,7 +83,7 @@ func (h *ResourceHandler) ListResources(ctx context.Context, request mcp.CallToo
 		return response.Error(fmt.Sprintf("failed to list resources: %v", err))
 	}
 
-	// Extract lightweight resource summaries
+	// Extract metadata-only resource summaries
 	items := make([]map[string]interface{}, len(resources.Items))
 	for i, resource := range resources.Items {
 		items[i] = extractResourceSummary(&resource)
@@ -171,16 +171,21 @@ func (h *ResourceHandler) GetResource(ctx context.Context, request mcp.CallToolR
 	return response.JSON(resource.Object)
 }
 
-// extractResourceSummary extracts everything except spec from a resource for lightweight listing
+// extractResourceSummary extracts only metadata, apiVersion, and kind from a resource
 func extractResourceSummary(resource *unstructured.Unstructured) map[string]interface{} {
-	// Start with the full resource object
 	summary := make(map[string]interface{})
-	for k, v := range resource.Object {
-		summary[k] = v
+
+	if apiVersion := resource.GetAPIVersion(); apiVersion != "" {
+		summary["apiVersion"] = apiVersion
 	}
 
-	// Remove the spec field to keep response lightweight
-	delete(summary, "spec")
+	if kind := resource.GetKind(); kind != "" {
+		summary["kind"] = kind
+	}
+
+	if metadata := resource.Object["metadata"]; metadata != nil {
+		summary["metadata"] = metadata
+	}
 
 	return summary
 }

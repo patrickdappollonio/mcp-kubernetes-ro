@@ -61,7 +61,7 @@ func main() {
 	)
 
 	listResourcesTool := mcp.NewTool("list_resources",
-		mcp.WithDescription("List any Kubernetes resources by type with optional filtering, sorted newest first. If you need a list of all resources, use the list_api_resources tool."),
+		mcp.WithDescription("List any Kubernetes resources by type with optional filtering, sorted newest first. Returns only metadata, apiVersion, and kind for lightweight responses. Use get_resource for full resource details. If you need a list of all resources, use the list_api_resources tool."),
 		mcp.WithString("resource_type",
 			mcp.Required(),
 			mcp.Description("The type of resource to list - use plural form (e.g., \"pods\", \"deployments\", \"services\")"),

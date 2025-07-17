@@ -164,7 +164,10 @@ func (c *Client) ResolveResourceType(resourceType, apiVersion string) (schema.Gr
 		}
 	}
 
-	return schema.GroupVersionResource{}, fmt.Errorf("resource type %q not found", resourceType)
+	if apiVersion != "" {
+		return schema.GroupVersionResource{}, fmt.Errorf("resource type %q not found in API version %q", resourceType, apiVersion)
+	}
+	return schema.GroupVersionResource{}, fmt.Errorf("resource type %q not found in any available API version", resourceType)
 }
 
 // LogOptions represents options for retrieving pod logs
