@@ -102,6 +102,11 @@ linters:
         - -SA1019
         - -ST1003
         - all
+    wrapcheck:
+      extra-ignore-sigs:
+        - response.Error(
+        - response.Errorf(
+        - response.JSON(
   exclusions:
     generated: lax
     presets:

@@ -2,9 +2,6 @@ package handlers
 
 import (
 	"context"
-	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -13,8 +10,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/client-go/util/homedir"
 
 	"github.com/patrickdappollonio/mcp-kubernetes-ro/internal/kubernetes"
 	"github.com/patrickdappollonio/mcp-kubernetes-ro/internal/response"
@@ -25,17 +20,13 @@ import (
 // for filtering, pagination, and dynamic resource type resolution. The handler
 // supports both namespaced and cluster-scoped resources.
 type ResourceHandler struct {
-	client     *kubernetes.Client
-	baseConfig *kubernetes.Config
+	client *kubernetes.Client
 }
 
-// NewResourceHandler creates a new ResourceHandler with the provided Kubernetes client
-// and base configuration. The base configuration provides default values that can
-// be overridden on a per-request basis.
-func NewResourceHandler(client *kubernetes.Client, baseConfig *kubernetes.Config) *ResourceHandler {
+// NewResourceHandler creates a new ResourceHandler with the provided Kubernetes client.
+func NewResourceHandler(client *kubernetes.Client) *ResourceHandler {
 	return &ResourceHandler{
-		client:     client,
-		baseConfig: baseConfig,
+		client: client,
 	}
 }
 
@@ -88,13 +79,9 @@ func (h *ResourceHandler) ListResources(ctx context.Context, request mcp.CallToo
 	}
 
 	// Use the appropriate client based on context
-	client := h.client
-	if params.Context != "" {
-		contextClient, err := kubernetes.NewClientWithContext(h.baseConfig, params.Context)
-		if err != nil {
-			return response.Errorf("failed to create client with context %s: %v", params.Context, err)
-		}
-		client = contextClient
+	client, err := h.client.ForContext(params.Context)
+	if err != nil {
+		return response.Errorf("failed to create client with context %s: %v", params.Context, err)
 	}
 
 	gvr, err := client.ResolveResourceType(params.ResourceType, params.APIVersion)
@@ -201,13 +188,9 @@ func (h *ResourceHandler) GetResource(ctx context.Context, request mcp.CallToolR
 	}
 
 	// Use the appropriate client based on context
-	client := h.client
-	if params.Context != "" {
-		contextClient, err := kubernetes.NewClientWithContext(h.baseConfig, params.Context)
-		if err != nil {
-			return response.Errorf("failed to create client with context %s: %v", params.Context, err)
-		}
-		client = contextClient
+	client, err := h.client.ForContext(params.Context)
+	if err != nil {
+		return response.Errorf("failed to create client with context %s: %v", params.Context, err)
 	}
 
 	gvr, err := client.ResolveResourceType(params.ResourceType, params.APIVersion)
@@ -300,7 +283,7 @@ type APIResource struct {
 // It discovers and returns information about all available Kubernetes API resources
 // in the cluster, similar to "kubectl api-resources". This is useful for understanding
 // what resource types are available and their capabilities.
-func (h *ResourceHandler) ListAPIResources(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func (h *ResourceHandler) ListAPIResources(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	lists, err := h.client.DiscoverResources(ctx)
 	if err != nil {
 		return response.Errorf("failed to discover API resources: %v", err)
@@ -314,7 +297,8 @@ func (h *ResourceHandler) ListAPIResources(ctx context.Context, request mcp.Call
 			continue
 		}
 
-		for _, resource := range list.APIResources {
+		for i := range list.APIResources {
+			resource := &list.APIResources[i]
 			if strings.Contains(resource.Name, "/") {
 				continue
 			}
@@ -344,32 +328,12 @@ func (h *ResourceHandler) ListAPIResources(ctx context.Context, request mcp.Call
 	return response.JSON(result)
 }
 
-// KubeContext represents a Kubernetes context from the kubeconfig file.
-// It contains the configuration needed to connect to a specific cluster
-// with specific user credentials and default namespace.
-type KubeContext struct {
-	// Name is the context name as defined in the kubeconfig file.
-	Name string `json:"name"`
-
-	// Cluster refers to the cluster configuration section in kubeconfig.
-	Cluster string `json:"cluster"`
-
-	// User refers to the user credentials section in kubeconfig.
-	User string `json:"user"`
-
-	// Namespace is the default namespace for this context (if specified).
-	Namespace string `json:"namespace,omitempty"`
-
-	// Current indicates whether this is the currently active context.
-	Current bool `json:"current"`
-}
-
 // ListContexts implements the list_contexts MCP tool.
 // It reads the kubeconfig file and returns information about all available
 // Kubernetes contexts. This helps users understand what clusters and configurations
 // are available for use with the context parameter in other tools.
-func (h *ResourceHandler) ListContexts(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	contexts, err := h.listKubeContexts()
+func (h *ResourceHandler) ListContexts(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	contexts, err := h.client.ListContexts()
 	if err != nil {
 		return response.Errorf("failed to list contexts: %v", err)
 	}
@@ -382,62 +346,6 @@ func (h *ResourceHandler) ListContexts(ctx context.Context, request mcp.CallTool
 	return response.JSON(result)
 }
 
-// listKubeContexts reads and parses the kubeconfig file to extract context information.
-// It handles the same kubeconfig resolution logic as the Kubernetes client creation,
-// supporting explicit paths, environment variables, and default locations.
-func (h *ResourceHandler) listKubeContexts() ([]KubeContext, error) {
-	kubeconfig := h.baseConfig.Kubeconfig
-	if kubeconfig == "" {
-		// Check KUBECONFIG environment variable first
-		if envKubeconfig := os.Getenv("KUBECONFIG"); envKubeconfig != "" {
-			kubeconfig = envKubeconfig
-		} else {
-			// Fall back to default location
-			if home := homedir.HomeDir(); home != "" {
-				kubeconfig = filepath.Join(home, ".kube", "config")
-			}
-		}
-	}
-
-	configLoadingRules := &clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeconfig}
-	configOverrides := &clientcmd.ConfigOverrides{}
-
-	clientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
-		configLoadingRules,
-		configOverrides,
-	)
-
-	rawConfig, err := clientConfig.RawConfig()
-	if err != nil {
-		return nil, fmt.Errorf("failed to load kubeconfig: %w", err)
-	}
-
-	var contexts []KubeContext
-	for name, context := range rawConfig.Contexts {
-		kubeContext := KubeContext{
-			Name:      name,
-			Cluster:   context.Cluster,
-			User:      context.AuthInfo,
-			Namespace: context.Namespace,
-			Current:   name == rawConfig.CurrentContext,
-		}
-		contexts = append(contexts, kubeContext)
-	}
-
-	// Sort contexts by name for consistent output, but put current context first
-	sort.Slice(contexts, func(i, j int) bool {
-		if contexts[i].Current {
-			return true
-		}
-		if contexts[j].Current {
-			return false
-		}
-		return contexts[i].Name < contexts[j].Name
-	})
-
-	return contexts, nil
-}
-
 // GetTools returns all resource-related MCP tools provided by this handler.
 // This includes tools for listing resources, getting specific resources,
 // discovering API resources, and managing Kubernetes contexts.
@@ -445,7 +353,7 @@ func (h *ResourceHandler) GetTools() []MCPTool {
 	return []MCPTool{
 		NewMCPTool(
 			mcp.NewTool("list_resources",
-				mcp.WithDescription("List any Kubernetes resources by type with optional filtering, sorted newest first. Returns only metadata, apiVersion, and kind for lightweight responses. Use get_resource for full resource details. If you need a list of all resources, use the list_api_resources tool."),
+				mcp.WithDescription("List any Kubernetes resources by type with optional filtering, sorted newest first. Returns only metadata, apiVersion, and kind."),
 				mcp.WithString("resource_type",
 					mcp.Required(),
 					mcp.Description("The type of resource to list"),

@@ -23,7 +23,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/client-go/util/homedir"
 	metricsv1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
 	metricsClient "k8s.io/metrics/pkg/client/clientset/versioned"
 )
@@ -46,6 +45,7 @@ type Client struct {
 	metricsClient   metricsClient.Interface
 	config          *rest.Config
 	namespace       string
+	originalConfig  *Config
 }
 
 // Config holds the configuration parameters for creating a Kubernetes client.
@@ -63,21 +63,21 @@ type Config struct {
 	Namespace string
 }
 
-// NewClient creates a new Kubernetes client using the provided configuration.
-// It initializes all necessary client interfaces and validates connectivity.
-// This is a convenience wrapper around NewClientWithContext with an empty context.
-func NewClient(cfg *Config) (*Client, error) {
-	return NewClientWithContext(cfg, "")
-}
-
 // NewClientWithContext creates a new Kubernetes client using the provided configuration
-// and a specific Kubernetes context. This allows for per-operation context switching
-// without recreating the entire client.
+// and a specific Kubernetes context. It initializes all necessary client interfaces
+// and validates connectivity.
 //
 // The context parameter specifies which Kubernetes context from the kubeconfig
 // to use. If empty, it uses the current context from the kubeconfig file.
-func NewClientWithContext(cfg *Config, context string) (*Client, error) {
-	config, err := buildConfig(cfg.Kubeconfig, context)
+//
+// This function resolves the kubeconfig path and updates the original Config struct
+// with the resolved path, ensuring all components have access to the complete configuration.
+func NewClientWithContext(cfg *Config, contextName string) (*Client, error) {
+	// Resolve and update the kubeconfig path in the original Config struct
+	resolvedKubeconfig := resolveKubeconfigPath(cfg.Kubeconfig)
+	cfg.Kubeconfig = resolvedKubeconfig
+
+	config, err := buildConfig(resolvedKubeconfig, contextName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build Kubernetes config: %w", err)
 	}
@@ -97,7 +97,7 @@ func NewClientWithContext(cfg *Config, context string) (*Client, error) {
 		return nil, fmt.Errorf("failed to create discovery client: %w", err)
 	}
 
-	metricsClient, err := metricsClient.NewForConfig(config)
+	metricsClientset, err := metricsClient.NewForConfig(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create metrics client: %w", err)
 	}
@@ -106,42 +106,133 @@ func NewClientWithContext(cfg *Config, context string) (*Client, error) {
 		clientset:       clientset,
 		dynamicClient:   dynamicClient,
 		discoveryClient: discoveryClient,
-		metricsClient:   metricsClient,
+		metricsClient:   metricsClientset,
 		config:          config,
 		namespace:       cfg.Namespace,
+		originalConfig:  cfg,
 	}, nil
 }
 
-func buildConfig(kubeconfig, context string) (*rest.Config, error) {
+// resolveKubeconfigPath resolves the kubeconfig path using the same logic as buildConfig.
+// It returns the resolved path or an empty string if in-cluster config should be used.
+func resolveKubeconfigPath(kubeconfig string) string {
 	if kubeconfig == "" {
 		// Check KUBECONFIG environment variable first
 		if envKubeconfig := os.Getenv("KUBECONFIG"); envKubeconfig != "" {
 			kubeconfig = envKubeconfig
 		} else {
-			// Fall back to default location
-			if home := homedir.HomeDir(); home != "" {
-				kubeconfig = filepath.Join(home, ".kube", "config")
-			}
+			kubeconfig = filepath.Join(os.Getenv("HOME"), ".kube", "config")
 		}
 	}
+	return kubeconfig
+}
 
-	if _, err := os.Stat(kubeconfig); os.IsNotExist(err) {
-		return rest.InClusterConfig()
+func buildConfig(kubeconfig, contextName string) (*rest.Config, error) {
+	resolvedKubeconfig := resolveKubeconfigPath(kubeconfig)
+
+	if resolvedKubeconfig == "" {
+		// No kubeconfig file specified, try in-cluster config
+		return rest.InClusterConfig() //nolint:wrapcheck // kubernetes client-go errors are self-descriptive
+	}
+
+	rules := clientcmd.NewDefaultClientConfigLoadingRules()
+	rules.ExplicitPath = resolvedKubeconfig
+
+	overrides := &clientcmd.ConfigOverrides{}
+	if contextName != "" {
+		overrides.CurrentContext = contextName
+	}
+
+	clientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, overrides)
+	return clientConfig.ClientConfig() //nolint:wrapcheck // kubernetes client-go errors are self-descriptive
+}
+
+// WithContext returns a new client configured to use the specified Kubernetes context.
+// If contextName is empty, it returns the current client unchanged.
+// This method allows for per-operation context switching without modifying the original client.
+func (c *Client) WithContext(contextName string) (*Client, error) {
+	if contextName == "" {
+		return c, nil
+	}
+	return NewClientWithContext(c.originalConfig, contextName)
+}
+
+// ForContext returns a new client configured for the specified Kubernetes context.
+// If contextName is empty, it returns the current client unchanged.
+// This is a convenience method for handlers that need to conditionally switch contexts.
+func (c *Client) ForContext(contextName string) (*Client, error) {
+	if contextName == "" {
+		return c, nil
+	}
+	return c.WithContext(contextName)
+}
+
+// KubeContext represents a Kubernetes context from the kubeconfig file.
+// It contains the configuration needed to connect to a specific cluster
+// with specific user credentials and default namespace.
+type KubeContext struct {
+	// Name is the context name as defined in the kubeconfig file.
+	Name string `json:"name"`
+
+	// Cluster refers to the cluster configuration section in kubeconfig.
+	Cluster string `json:"cluster"`
+
+	// User refers to the user credentials section in kubeconfig.
+	User string `json:"user"`
+
+	// Namespace is the default namespace for this context (if specified).
+	Namespace string `json:"namespace,omitempty"`
+
+	// Current indicates whether this is the currently active context.
+	Current bool `json:"current"`
+}
+
+// ListContexts reads and parses the kubeconfig file to extract context information.
+// It requires that the kubeconfig path has already been resolved during client creation.
+// If no kubeconfig is available, it fails rather than attempting resolution.
+func (c *Client) ListContexts() ([]KubeContext, error) {
+	kubeconfig := c.originalConfig.Kubeconfig
+	if kubeconfig == "" {
+		return nil, errors.New("no kubeconfig available: provide a kubeconfig file path for the MCP server")
 	}
 
 	configLoadingRules := &clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeconfig}
 	configOverrides := &clientcmd.ConfigOverrides{}
-
-	if context != "" {
-		configOverrides.CurrentContext = context
-	}
 
 	clientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
 		configLoadingRules,
 		configOverrides,
 	)
 
-	return clientConfig.ClientConfig()
+	rawConfig, err := clientConfig.RawConfig()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load kubeconfig: %w", err)
+	}
+
+	contexts := make([]KubeContext, 0, len(rawConfig.Contexts))
+	for name, context := range rawConfig.Contexts {
+		kubeContext := KubeContext{
+			Name:      name,
+			Cluster:   context.Cluster,
+			User:      context.AuthInfo,
+			Namespace: context.Namespace,
+			Current:   name == rawConfig.CurrentContext,
+		}
+		contexts = append(contexts, kubeContext)
+	}
+
+	// Sort contexts by name for consistent output, but put current context first
+	sort.Slice(contexts, func(i, j int) bool {
+		if contexts[i].Current {
+			return true
+		}
+		if contexts[j].Current {
+			return false
+		}
+		return contexts[i].Name < contexts[j].Name
+	})
+
+	return contexts, nil
 }
 
 // ListResources retrieves a list of Kubernetes resources of the specified type.
@@ -151,6 +242,8 @@ func buildConfig(kubeconfig, context string) (*rest.Config, error) {
 // The gvr parameter specifies the GroupVersionResource to list.
 // The namespace parameter is used for namespaced resources; leave empty for cluster-scoped resources.
 // The opts parameter provides filtering and pagination options.
+//
+//nolint:gocritic // opts is from external package, can't change signature
 func (c *Client) ListResources(ctx context.Context, gvr schema.GroupVersionResource, namespace string, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
 	if namespace == "" && c.namespace != "" {
 		namespace = c.namespace
@@ -163,7 +256,7 @@ func (c *Client) ListResources(ctx context.Context, gvr schema.GroupVersionResou
 		resourceInterface = c.dynamicClient.Resource(gvr)
 	}
 
-	return resourceInterface.List(ctx, opts)
+	return resourceInterface.List(ctx, opts) //nolint:wrapcheck // kubernetes API errors are self-descriptive
 }
 
 // GetResource retrieves a specific Kubernetes resource by name and type.
@@ -184,14 +277,14 @@ func (c *Client) GetResource(ctx context.Context, gvr schema.GroupVersionResourc
 		resourceInterface = c.dynamicClient.Resource(gvr)
 	}
 
-	return resourceInterface.Get(ctx, name, metav1.GetOptions{})
+	return resourceInterface.Get(ctx, name, metav1.GetOptions{}) //nolint:wrapcheck // kubernetes API errors are self-descriptive
 }
 
 // DiscoverResources retrieves the list of available API resources from the cluster.
 // This is used to understand what resource types are available and their capabilities
 // (namespaced vs cluster-scoped, supported verbs, etc.).
-func (c *Client) DiscoverResources(ctx context.Context) ([]*metav1.APIResourceList, error) {
-	return c.discoveryClient.ServerPreferredResources()
+func (c *Client) DiscoverResources(_ context.Context) ([]*metav1.APIResourceList, error) {
+	return c.discoveryClient.ServerPreferredResources() //nolint:wrapcheck // kubernetes API errors are self-descriptive
 }
 
 // ResolveResourceType converts a user-friendly resource type name to a GroupVersionResource.
@@ -228,6 +321,7 @@ func (c *Client) ResolveResourceType(resourceType, apiVersion string) (schema.Gr
 			continue
 		}
 
+		//nolint:gocritic // copying API resource struct is acceptable for this use case
 		for _, resource := range list.APIResources {
 			// Skip subresources (those with '/' in the name)
 			if strings.Contains(resource.Name, "/") {
@@ -358,7 +452,7 @@ func (c *Client) GetPodLogsWithOptions(ctx context.Context, namespace, podName s
 	}
 
 	if namespace == "" {
-		return "", fmt.Errorf("namespace is required")
+		return "", errors.New("namespace is required")
 	}
 
 	logOptions := &corev1.PodLogOptions{}
@@ -415,17 +509,17 @@ func (c *Client) GetPodContainers(ctx context.Context, namespace, podName string
 	}
 
 	if namespace == "" {
-		return nil, fmt.Errorf("namespace is required")
+		return nil, errors.New("namespace is required")
 	}
 
 	pod, err := c.clientset.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get pod: %w", err)
+		return nil, fmt.Errorf("failed to get pod %q: %w", podName, err)
 	}
 
-	var containers []string
-	for _, container := range pod.Spec.Containers {
-		containers = append(containers, container.Name)
+	containers := make([]string, 0, len(pod.Spec.Containers))
+	for i := range pod.Spec.Containers {
+		containers = append(containers, pod.Spec.Containers[i].Name)
 	}
 
 	return containers, nil
@@ -434,31 +528,35 @@ func (c *Client) GetPodContainers(ctx context.Context, namespace, podName string
 // GetNodeMetrics retrieves CPU and memory usage metrics for all nodes in the cluster.
 // Requires the metrics-server to be installed and running in the cluster.
 func (c *Client) GetNodeMetrics(ctx context.Context) (*metricsv1beta1.NodeMetricsList, error) {
-	return c.metricsClient.MetricsV1beta1().NodeMetricses().List(ctx, metav1.ListOptions{})
+	return c.metricsClient.MetricsV1beta1().NodeMetricses().List(ctx, metav1.ListOptions{}) //nolint:wrapcheck // kubernetes API errors are self-descriptive
 }
 
 // GetNodeMetricsWithOptions retrieves node metrics with pagination support.
 // This allows for controlled retrieval of large numbers of node metrics.
+//
+//nolint:gocritic // opts is from external package, can't change signature
 func (c *Client) GetNodeMetricsWithOptions(ctx context.Context, opts metav1.ListOptions) (*metricsv1beta1.NodeMetricsList, error) {
-	return c.metricsClient.MetricsV1beta1().NodeMetricses().List(ctx, opts)
+	return c.metricsClient.MetricsV1beta1().NodeMetricses().List(ctx, opts) //nolint:wrapcheck // kubernetes API errors are self-descriptive
 }
 
 // GetNodeMetricsByName retrieves metrics for a specific node by name.
 // Useful when you need metrics for just one node rather than all nodes.
 func (c *Client) GetNodeMetricsByName(ctx context.Context, nodeName string) (*metricsv1beta1.NodeMetrics, error) {
-	return c.metricsClient.MetricsV1beta1().NodeMetricses().Get(ctx, nodeName, metav1.GetOptions{})
+	return c.metricsClient.MetricsV1beta1().NodeMetricses().Get(ctx, nodeName, metav1.GetOptions{}) //nolint:wrapcheck // kubernetes API errors are self-descriptive
 }
 
 // GetPodMetrics retrieves CPU and memory usage metrics for all pods across all namespaces.
 // Requires the metrics-server to be installed and running in the cluster.
 func (c *Client) GetPodMetrics(ctx context.Context) (*metricsv1beta1.PodMetricsList, error) {
-	return c.metricsClient.MetricsV1beta1().PodMetricses("").List(ctx, metav1.ListOptions{})
+	return c.metricsClient.MetricsV1beta1().PodMetricses("").List(ctx, metav1.ListOptions{}) //nolint:wrapcheck // kubernetes API errors are self-descriptive
 }
 
 // GetPodMetricsWithOptions retrieves pod metrics with pagination support.
 // This allows for controlled retrieval of large numbers of pod metrics.
+//
+//nolint:gocritic // opts is from external package, can't change signature
 func (c *Client) GetPodMetricsWithOptions(ctx context.Context, opts metav1.ListOptions) (*metricsv1beta1.PodMetricsList, error) {
-	return c.metricsClient.MetricsV1beta1().PodMetricses("").List(ctx, opts)
+	return c.metricsClient.MetricsV1beta1().PodMetricses("").List(ctx, opts) //nolint:wrapcheck // kubernetes API errors are self-descriptive
 }
 
 // GetPodMetricsByNamespace retrieves metrics for all pods in a specific namespace.
@@ -468,13 +566,15 @@ func (c *Client) GetPodMetricsByNamespace(ctx context.Context, namespace string)
 	if namespace == "" && c.namespace != "" {
 		namespace = c.namespace
 	}
-	return c.metricsClient.MetricsV1beta1().PodMetricses(namespace).List(ctx, metav1.ListOptions{})
+	return c.metricsClient.MetricsV1beta1().PodMetricses(namespace).List(ctx, metav1.ListOptions{}) //nolint:wrapcheck // kubernetes API errors are self-descriptive
 }
 
 // GetPodMetricsByNamespaceWithOptions retrieves namespace-scoped pod metrics with pagination support.
 // Combines namespace filtering with pagination for efficient large-scale metrics retrieval.
+//
+//nolint:gocritic // opts is from external package, can't change signature
 func (c *Client) GetPodMetricsByNamespaceWithOptions(ctx context.Context, namespace string, opts metav1.ListOptions) (*metricsv1beta1.PodMetricsList, error) {
-	return c.metricsClient.MetricsV1beta1().PodMetricses(namespace).List(ctx, opts)
+	return c.metricsClient.MetricsV1beta1().PodMetricses(namespace).List(ctx, opts) //nolint:wrapcheck // kubernetes API errors are self-descriptive
 }
 
 // GetPodMetricsByName retrieves metrics for a specific pod by name and namespace.
@@ -483,7 +583,7 @@ func (c *Client) GetPodMetricsByName(ctx context.Context, namespace, podName str
 	if namespace == "" && c.namespace != "" {
 		namespace = c.namespace
 	}
-	return c.metricsClient.MetricsV1beta1().PodMetricses(namespace).Get(ctx, podName, metav1.GetOptions{})
+	return c.metricsClient.MetricsV1beta1().PodMetricses(namespace).Get(ctx, podName, metav1.GetOptions{}) //nolint:wrapcheck // kubernetes API errors are self-descriptive
 }
 
 // TestConnectivity performs a comprehensive connectivity check to verify the cluster
@@ -507,12 +607,10 @@ func (c *Client) TestConnectivity(ctx context.Context) error {
 	// Note: This can have warnings (like deprecated APIs) but should not fail connectivity
 	resources, err := c.discoveryClient.ServerPreferredResources()
 	if err != nil {
-		// Check if we got partial results (warnings vs complete failure)
+		// Check if we got no results: this is likely a failure
 		if len(resources) == 0 {
 			return fmt.Errorf("failed to discover API resources: %w", err)
 		}
-		// If we got some resources, it's likely just warnings about deprecated APIs
-		fmt.Fprintf(os.Stderr, "Warning: Some API resources may be deprecated or unavailable: %v\n", err)
 	}
 
 	// Test 3: Try a simple API call to ensure we have basic permissions
@@ -522,7 +620,9 @@ func (c *Client) TestConnectivity(ctx context.Context) error {
 	}
 
 	// Log successful connectivity with some basic cluster info
-	fmt.Fprintf(os.Stderr, "✓ Successfully connected to Kubernetes cluster (version: %s, %d namespaces accessible)\n",
-		version.String(), len(namespaces.Items))
+	fmt.Fprintf(os.Stderr,
+		"✓ Successfully connected to Kubernetes cluster (version: %s, %d namespaces accessible)\n",
+		version.String(), len(namespaces.Items),
+	)
 	return nil
 }

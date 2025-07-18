@@ -19,17 +19,13 @@ import (
 // The handler supports both cluster-wide and targeted metrics retrieval with
 // client-side pagination for consistent ordering and performance.
 type MetricsHandler struct {
-	client     *kubernetes.Client
-	baseConfig *kubernetes.Config
+	client *kubernetes.Client
 }
 
-// NewMetricsHandler creates a new MetricsHandler with the provided Kubernetes client
-// and base configuration. The base configuration provides default values that can
-// be overridden on a per-request basis.
-func NewMetricsHandler(client *kubernetes.Client, baseConfig *kubernetes.Config) *MetricsHandler {
+// NewMetricsHandler creates a new MetricsHandler with the provided Kubernetes client.
+func NewMetricsHandler(client *kubernetes.Client) *MetricsHandler {
 	return &MetricsHandler{
-		client:     client,
-		baseConfig: baseConfig,
+		client: client,
 	}
 }
 
@@ -109,13 +105,9 @@ func (h *MetricsHandler) GetNodeMetrics(ctx context.Context, request mcp.CallToo
 	}
 
 	// Use the appropriate client based on context
-	client := h.client
-	if params.Context != "" {
-		contextClient, err := kubernetes.NewClientWithContext(h.baseConfig, params.Context)
-		if err != nil {
-			return response.Errorf("failed to create client with context %q: %s", params.Context, err)
-		}
-		client = contextClient
+	client, err := h.client.ForContext(params.Context)
+	if err != nil {
+		return response.Errorf("failed to create client with context %q: %s", params.Context, err)
 	}
 
 	if params.NodeName != "" {
@@ -142,8 +134,8 @@ func (h *MetricsHandler) GetNodeMetrics(ctx context.Context, request mcp.CallToo
 
 	// Convert to interface slice for client-side pagination
 	allItems := make([]interface{}, len(nodeMetricsList.Items))
-	for i, nodeMetrics := range nodeMetricsList.Items {
-		allItems[i] = nodeMetrics
+	for i := range nodeMetricsList.Items {
+		allItems[i] = nodeMetricsList.Items[i]
 	}
 
 	// Sort by timestamp (newest first) for consistent ordering
@@ -202,13 +194,9 @@ func (h *MetricsHandler) GetPodMetrics(ctx context.Context, request mcp.CallTool
 	}
 
 	// Use the appropriate client based on context
-	client := h.client
-	if params.Context != "" {
-		contextClient, err := kubernetes.NewClientWithContext(h.baseConfig, params.Context)
-		if err != nil {
-			return response.Errorf("failed to create client with context %s: %v", params.Context, err)
-		}
-		client = contextClient
+	client, err := h.client.ForContext(params.Context)
+	if err != nil {
+		return response.Errorf("failed to create client with context %s: %v", params.Context, err)
 	}
 
 	if params.PodName != "" {
@@ -230,7 +218,6 @@ func (h *MetricsHandler) GetPodMetrics(ctx context.Context, request mcp.CallTool
 
 	// Always fetch all pod metrics from the server
 	var podMetricsList *metricsv1beta1.PodMetricsList
-	var err error
 
 	if params.Namespace != "" {
 		// Get pod metrics for specific namespace
@@ -249,8 +236,8 @@ func (h *MetricsHandler) GetPodMetrics(ctx context.Context, request mcp.CallTool
 
 	// Convert to interface slice for client-side pagination
 	allItems := make([]interface{}, len(podMetricsList.Items))
-	for i, podMetrics := range podMetricsList.Items {
-		allItems[i] = podMetrics
+	for i := range podMetricsList.Items {
+		allItems[i] = podMetricsList.Items[i]
 	}
 
 	// Sort by timestamp (newest first) for consistent ordering
@@ -324,6 +311,8 @@ func generateContinueToken(offset int, itemType, namespace string) string {
 		Type:      itemType,
 		Namespace: namespace,
 	}
+
+	//nolint:errchkjson // we control the struct and it's strongly typed
 	data, _ := json.Marshal(state)
 	return base64.URLEncoding.EncodeToString(data)
 }
@@ -336,19 +325,19 @@ func parseContinueToken(token string) (*PaginationState, error) {
 
 	data, err := base64.URLEncoding.DecodeString(token)
 	if err != nil {
-		return nil, fmt.Errorf("invalid continue token: %v", err)
+		return nil, fmt.Errorf("invalid continue token: %w", err)
 	}
 
 	var state PaginationState
 	if err := json.Unmarshal(data, &state); err != nil {
-		return nil, fmt.Errorf("invalid continue token format: %v", err)
+		return nil, fmt.Errorf("invalid continue token format: %w", err)
 	}
 
 	return &state, nil
 }
 
 // paginateItems applies client-side pagination to a slice of items
-func paginateItems(items []interface{}, limit int, offset int) ([]interface{}, bool) {
+func paginateItems(items []interface{}, limit, offset int) ([]interface{}, bool) {
 	if offset >= len(items) {
 		return []interface{}{}, false
 	}

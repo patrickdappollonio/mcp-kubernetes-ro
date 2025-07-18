@@ -53,11 +53,16 @@ Add the following configuration to your editor's settings to use `mcp-kubernetes
         // "--kubeconfig=/path/to/kubeconfig",
         // "--namespace=default",
         // "--transport=stdio",
-        // "--port=8080"
+        // "--port=8080",
+        // "--disabled-tools=get_logs,decode_base64"
       ],
       "env": {
         // Set KUBECONFIG environment variable if needed:
-        // "KUBECONFIG": "/path/to/kubeconfig"
+        // "KUBECONFIG": "/path/to/kubeconfig",
+        // Set MCP_KUBERNETES_RO_DISABLED_TOOLS environment variable if needed:
+        // "MCP_KUBERNETES_RO_DISABLED_TOOLS": "get_logs,decode_base64",
+        // Or use generic DISABLED_TOOLS environment variable:
+        // "DISABLED_TOOLS": "get_logs,decode_base64"
       }
     }
   }
@@ -80,7 +85,16 @@ And this is how to leverage the Docker image instead:
         "-e", "KUBECONFIG=/root/.kube/config",
         "-v", "/path/to/kubeconfig:/root/.kube/config",
         "ghcr.io/patrickdappollonio/mcp-kubernetes-ro"
-      ]
+        // Place additional flags here, like --disabled-tools=get_logs,decode_base64
+      ],
+      "env": {
+        // Set KUBECONFIG environment variable if needed:
+        // "KUBECONFIG": "/path/to/kubeconfig",
+        // Set MCP_KUBERNETES_RO_DISABLED_TOOLS environment variable if needed:
+        // "MCP_KUBERNETES_RO_DISABLED_TOOLS": "get_logs,decode_base64",
+        // Or use generic DISABLED_TOOLS environment variable:
+        // "DISABLED_TOOLS": "get_logs,decode_base64"
+      }
     },
   }
 }
@@ -109,6 +123,68 @@ There are **10 tools** available:
 - **`get_pod_metrics`**: Get pod metrics (CPU and memory usage)
 - **`encode_base64`**: Encode text data to base64 format
 - **`decode_base64`**: Decode base64 data to text format
+
+## Tool Management
+
+### Disabling Tools
+
+You can disable specific tools using either the `--disabled-tools` command line flag or environment variables with a comma-separated list of tool names. Two environment variables are supported to accommodate different use cases:
+
+- **`MCP_KUBERNETES_RO_DISABLED_TOOLS`**: App-specific variable that won't conflict with other tools
+- **`DISABLED_TOOLS`**: Generic variable that can be shared across multiple tools in your environment
+
+**Priority order**:
+1. **Command line flag**: `--disabled-tools=NAMES` (highest priority)
+2. **App-specific environment variable**: `MCP_KUBERNETES_RO_DISABLED_TOOLS`
+3. **Generic environment variable**: `DISABLED_TOOLS`
+
+This is useful for:
+
+- **Security**: Disable tools that might expose sensitive information (e.g., `get_logs`, `decode_base64`)
+- **Performance**: Disable resource-intensive tools when not needed (e.g., `get_node_metrics`, `get_pod_metrics`)
+- **Environment-specific**: Disable tools that aren't available in your cluster (e.g., metrics tools when metrics server is not installed)
+- **Compliance**: Restrict functionality to meet organizational policies
+
+**Available tool names for disabling:**
+- `list_resources`
+- `get_resource`
+- `get_logs`
+- `get_pod_containers`
+- `list_api_resources`
+- `list_contexts`
+- `get_node_metrics`
+- `get_pod_metrics`
+- `encode_base64`
+- `decode_base64`
+
+When a tool is disabled, it will not be registered with the MCP server and will not appear in the available tools list. A message will be logged to stderr indicating which tools have been skipped.
+
+**Examples:**
+```bash
+# Using command line flag (highest priority)
+mcp-kubernetes-ro --disabled-tools=encode_base64,decode_base64,get_logs
+
+# Using app-specific environment variable
+export MCP_KUBERNETES_RO_DISABLED_TOOLS=encode_base64,decode_base64,get_logs
+mcp-kubernetes-ro
+
+# Using generic environment variable
+export DISABLED_TOOLS=encode_base64,decode_base64,get_logs
+mcp-kubernetes-ro
+
+# Priority demonstration: command line flag overrides environment variables
+export MCP_KUBERNETES_RO_DISABLED_TOOLS=get_logs
+export DISABLED_TOOLS=get_pod_metrics
+mcp-kubernetes-ro --disabled-tools=encode_base64,decode_base64
+
+# Priority demonstration: app-specific env var overrides generic env var
+export MCP_KUBERNETES_RO_DISABLED_TOOLS=encode_base64,decode_base64
+export DISABLED_TOOLS=get_logs,get_pod_metrics
+mcp-kubernetes-ro
+
+# Output: Skipping disabled tool: "encode_base64"
+# Output: Skipping disabled tool: "decode_base64"
+```
 
 ## Running Modes
 
@@ -141,6 +217,11 @@ The following command-line flags are available to configure the MCP server:
 ### Transport Options
 - `--transport=TYPE`: Transport type: `stdio` or `sse` (default: `stdio`)
 - `--port=PORT`: Port for SSE server (default: 8080, only used with `--transport=sse`)
+
+### Tool Management
+- `--disabled-tools=NAMES`: Comma-separated list of tool names to disable (optional)
+- `MCP_KUBERNETES_RO_DISABLED_TOOLS`: App-specific environment variable for disabled tools (command line flag takes priority)
+- `DISABLED_TOOLS`: Generic environment variable for disabled tools (lower priority than `MCP_KUBERNETES_RO_DISABLED_TOOLS`)
 
 ### Context Configuration
 
@@ -523,6 +604,30 @@ mcp-kubernetes-ro \
 
 # Using per-command context (specify context in tool calls)
 # Context is now specified at the tool level, not globally
+
+# Disable specific tools for security or performance reasons
+mcp-kubernetes-ro --disabled-tools=get_logs,decode_base64
+
+# Disable metrics tools when metrics server is not available
+mcp-kubernetes-ro --disabled-tools=get_node_metrics,get_pod_metrics
+
+# Disable multiple tools in production environment
+mcp-kubernetes-ro \
+  --kubeconfig ~/.kube/prod-config \
+  --disabled-tools=encode_base64,decode_base64,get_logs
+
+# Use app-specific environment variable for disabled tools
+export MCP_KUBERNETES_RO_DISABLED_TOOLS=get_logs,decode_base64
+mcp-kubernetes-ro
+
+# Use generic environment variable for disabled tools
+export DISABLED_TOOLS=get_logs,decode_base64
+mcp-kubernetes-ro
+
+# Command line flag takes priority over both environment variables
+export MCP_KUBERNETES_RO_DISABLED_TOOLS=get_logs,decode_base64
+export DISABLED_TOOLS=get_pod_metrics
+mcp-kubernetes-ro --disabled-tools=get_node_metrics,get_pod_metrics
 ```
 
 ## Use Cases
