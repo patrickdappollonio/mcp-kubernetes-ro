@@ -74,11 +74,11 @@ func main() {
 
 	for _, handler := range allHandlers {
 		for _, mcpTool := range handler.GetTools() {
-			toolName := mcpTool.Tool().Name
-			if filter.IsDisabled(toolName) {
-				fmt.Fprintf(os.Stderr, "Skipping disabled tool: %q\n", toolName)
+			if tool := mcpTool.Tool().Name; filter.IsDisabled(tool) {
+				fmt.Fprintf(os.Stderr, "Skipping disabled tool: %q\n", tool)
 				continue
 			}
+
 			s.AddTool(mcpTool.Tool(), mcpTool.Handler())
 		}
 	}
