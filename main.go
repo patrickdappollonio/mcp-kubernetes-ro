@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/mark3labs/mcp-go/server"
+	"github.com/patrickdappollonio/mcp-kubernetes-ro/internal/env"
 	"github.com/patrickdappollonio/mcp-kubernetes-ro/internal/handlers"
 	"github.com/patrickdappollonio/mcp-kubernetes-ro/internal/kubernetes"
 	"github.com/patrickdappollonio/mcp-kubernetes-ro/internal/toolfilter"
@@ -27,6 +28,9 @@ var (
 
 func main() {
 	flag.Parse()
+
+	// Handle environment variable for disabled tools
+	resolvedDisabledTools := env.FirstDefault(*disabledTools, "MCP_KUBERNETES_RO_DISABLED_TOOLS", "DISABLED_TOOLS")
 
 	kubeConfig := &kubernetes.Config{
 		Kubeconfig: *kubeconfig,
@@ -87,7 +91,7 @@ func main() {
 	}
 
 	// Create tool filter
-	filter := toolfilter.NewFilter(*disabledTools)
+	filter := toolfilter.NewFilter(resolvedDisabledTools)
 
 	// Register tools from handlers
 	for _, handler := range allHandlers {
