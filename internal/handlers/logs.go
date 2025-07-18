@@ -17,17 +17,13 @@ import (
 // It supports advanced log filtering with grep-like capabilities, time-based filtering,
 // container selection in multi-container pods, and access to previous container logs.
 type LogHandler struct {
-	client     *kubernetes.Client
-	baseConfig *kubernetes.Config
+	client *kubernetes.Client
 }
 
-// NewLogHandler creates a new LogHandler with the provided Kubernetes client
-// and base configuration. The base configuration provides default values that can
-// be overridden on a per-request basis.
-func NewLogHandler(client *kubernetes.Client, baseConfig *kubernetes.Config) *LogHandler {
+// NewLogHandler creates a new LogHandler with the provided Kubernetes client.
+func NewLogHandler(client *kubernetes.Client) *LogHandler {
 	return &LogHandler{
-		client:     client,
-		baseConfig: baseConfig,
+		client: client,
 	}
 }
 
@@ -80,7 +76,7 @@ func (h *LogHandler) GetLogs(ctx context.Context, request mcp.CallToolRequest) (
 	// Use the appropriate client based on context
 	client := h.client
 	if params.Context != "" {
-		contextClient, err := kubernetes.NewClientWithContext(h.baseConfig, params.Context)
+		contextClient, err := h.client.WithContext(params.Context)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create client with context %s: %w", params.Context, err)
 		}
@@ -203,7 +199,7 @@ func (h *LogHandler) GetPodContainers(ctx context.Context, request mcp.CallToolR
 	// Use the appropriate client based on context
 	client := h.client
 	if params.Context != "" {
-		contextClient, err := kubernetes.NewClientWithContext(h.baseConfig, params.Context)
+		contextClient, err := h.client.WithContext(params.Context)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create client with context %s: %w", params.Context, err)
 		}

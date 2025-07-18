@@ -33,7 +33,7 @@ func main() {
 		Namespace:  *namespace,
 	}
 
-	client, err := kubernetes.NewClient(kubeConfig)
+	client, err := kubernetes.NewClientWithContext(kubeConfig, "")
 	if err != nil {
 		log.Fatalf("Failed to create Kubernetes client: %v", err)
 	}
@@ -49,12 +49,10 @@ func main() {
 	cancel() // Clean up the context
 	fmt.Fprintln(os.Stderr, "Connected to Kubernetes cluster, starting MCP server...")
 
-	// Create tool filter
-	filter := toolfilter.NewFilter(*disabledTools)
-
-	resourceHandler := handlers.NewResourceHandler(client, kubeConfig)
-	logHandler := handlers.NewLogHandler(client, kubeConfig)
-	metricsHandler := handlers.NewMetricsHandler(client, kubeConfig)
+	// Define tools and handlers
+	resourceHandler := handlers.NewResourceHandler(client)
+	logHandler := handlers.NewLogHandler(client)
+	metricsHandler := handlers.NewMetricsHandler(client)
 	utilsHandler := handlers.NewUtilsHandler()
 
 	s := server.NewMCPServer(
@@ -73,6 +71,10 @@ func main() {
 		utilsHandler,
 	}
 
+	// Create tool filter
+	filter := toolfilter.NewFilter(*disabledTools)
+
+	// Register tools from handlers
 	for _, handler := range allHandlers {
 		for _, mcpTool := range handler.GetTools() {
 			if tool := mcpTool.Tool().Name; filter.IsDisabled(tool) {

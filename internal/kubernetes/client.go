@@ -45,6 +45,7 @@ type Client struct {
 	metricsClient   metricsClient.Interface
 	config          *rest.Config
 	namespace       string
+	originalConfig  *Config
 }
 
 // Config holds the configuration parameters for creating a Kubernetes client.
@@ -62,21 +63,21 @@ type Config struct {
 	Namespace string
 }
 
-// NewClient creates a new Kubernetes client using the provided configuration.
-// It initializes all necessary client interfaces and validates connectivity.
-// This is a convenience wrapper around NewClientWithContext with an empty context.
-func NewClient(cfg *Config) (*Client, error) {
-	return NewClientWithContext(cfg, "")
-}
-
 // NewClientWithContext creates a new Kubernetes client using the provided configuration
-// and a specific Kubernetes context. This allows for per-operation context switching
-// without recreating the entire client.
+// and a specific Kubernetes context. It initializes all necessary client interfaces
+// and validates connectivity.
 //
 // The context parameter specifies which Kubernetes context from the kubeconfig
 // to use. If empty, it uses the current context from the kubeconfig file.
+//
+// This function resolves the kubeconfig path and updates the original Config struct
+// with the resolved path, ensuring all components have access to the complete configuration.
 func NewClientWithContext(cfg *Config, contextName string) (*Client, error) {
-	config, err := buildConfig(cfg.Kubeconfig, contextName)
+	// Resolve and update the kubeconfig path in the original Config struct
+	resolvedKubeconfig := resolveKubeconfigPath(cfg.Kubeconfig)
+	cfg.Kubeconfig = resolvedKubeconfig
+
+	config, err := buildConfig(resolvedKubeconfig, contextName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build Kubernetes config: %w", err)
 	}
@@ -108,10 +109,13 @@ func NewClientWithContext(cfg *Config, contextName string) (*Client, error) {
 		metricsClient:   metricsClientset,
 		config:          config,
 		namespace:       cfg.Namespace,
+		originalConfig:  cfg,
 	}, nil
 }
 
-func buildConfig(kubeconfig, contextName string) (*rest.Config, error) {
+// resolveKubeconfigPath resolves the kubeconfig path using the same logic as buildConfig.
+// It returns the resolved path or an empty string if in-cluster config should be used.
+func resolveKubeconfigPath(kubeconfig string) string {
 	if kubeconfig == "" {
 		// Check KUBECONFIG environment variable first
 		if envKubeconfig := os.Getenv("KUBECONFIG"); envKubeconfig != "" {
@@ -120,14 +124,19 @@ func buildConfig(kubeconfig, contextName string) (*rest.Config, error) {
 			kubeconfig = filepath.Join(os.Getenv("HOME"), ".kube", "config")
 		}
 	}
+	return kubeconfig
+}
 
-	if kubeconfig == "" {
+func buildConfig(kubeconfig, contextName string) (*rest.Config, error) {
+	resolvedKubeconfig := resolveKubeconfigPath(kubeconfig)
+
+	if resolvedKubeconfig == "" {
 		// No kubeconfig file specified, try in-cluster config
 		return rest.InClusterConfig()
 	}
 
 	rules := clientcmd.NewDefaultClientConfigLoadingRules()
-	rules.ExplicitPath = kubeconfig
+	rules.ExplicitPath = resolvedKubeconfig
 
 	overrides := &clientcmd.ConfigOverrides{}
 	if contextName != "" {
@@ -136,6 +145,84 @@ func buildConfig(kubeconfig, contextName string) (*rest.Config, error) {
 
 	clientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, overrides)
 	return clientConfig.ClientConfig()
+}
+
+// WithContext returns a new client configured to use the specified Kubernetes context.
+// If contextName is empty, it returns the current client unchanged.
+// This method allows for per-operation context switching without modifying the original client.
+func (c *Client) WithContext(contextName string) (*Client, error) {
+	if contextName == "" {
+		return c, nil
+	}
+	return NewClientWithContext(c.originalConfig, contextName)
+}
+
+// KubeContext represents a Kubernetes context from the kubeconfig file.
+// It contains the configuration needed to connect to a specific cluster
+// with specific user credentials and default namespace.
+type KubeContext struct {
+	// Name is the context name as defined in the kubeconfig file.
+	Name string `json:"name"`
+
+	// Cluster refers to the cluster configuration section in kubeconfig.
+	Cluster string `json:"cluster"`
+
+	// User refers to the user credentials section in kubeconfig.
+	User string `json:"user"`
+
+	// Namespace is the default namespace for this context (if specified).
+	Namespace string `json:"namespace,omitempty"`
+
+	// Current indicates whether this is the currently active context.
+	Current bool `json:"current"`
+}
+
+// ListContexts reads and parses the kubeconfig file to extract context information.
+// It requires that the kubeconfig path has already been resolved during client creation.
+// If no kubeconfig is available, it fails rather than attempting resolution.
+func (c *Client) ListContexts() ([]KubeContext, error) {
+	kubeconfig := c.originalConfig.Kubeconfig
+	if kubeconfig == "" {
+		return nil, fmt.Errorf("no kubeconfig available: provide a kubeconfig file path for the MCP server")
+	}
+
+	configLoadingRules := &clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeconfig}
+	configOverrides := &clientcmd.ConfigOverrides{}
+
+	clientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+		configLoadingRules,
+		configOverrides,
+	)
+
+	rawConfig, err := clientConfig.RawConfig()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load kubeconfig: %w", err)
+	}
+
+	contexts := make([]KubeContext, 0, len(rawConfig.Contexts))
+	for name, context := range rawConfig.Contexts {
+		kubeContext := KubeContext{
+			Name:      name,
+			Cluster:   context.Cluster,
+			User:      context.AuthInfo,
+			Namespace: context.Namespace,
+			Current:   name == rawConfig.CurrentContext,
+		}
+		contexts = append(contexts, kubeContext)
+	}
+
+	// Sort contexts by name for consistent output, but put current context first
+	sort.Slice(contexts, func(i, j int) bool {
+		if contexts[i].Current {
+			return true
+		}
+		if contexts[j].Current {
+			return false
+		}
+		return contexts[i].Name < contexts[j].Name
+	})
+
+	return contexts, nil
 }
 
 // ListResources retrieves a list of Kubernetes resources of the specified type.

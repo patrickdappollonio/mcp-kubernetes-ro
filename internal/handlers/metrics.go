@@ -19,17 +19,13 @@ import (
 // The handler supports both cluster-wide and targeted metrics retrieval with
 // client-side pagination for consistent ordering and performance.
 type MetricsHandler struct {
-	client     *kubernetes.Client
-	baseConfig *kubernetes.Config
+	client *kubernetes.Client
 }
 
-// NewMetricsHandler creates a new MetricsHandler with the provided Kubernetes client
-// and base configuration. The base configuration provides default values that can
-// be overridden on a per-request basis.
-func NewMetricsHandler(client *kubernetes.Client, baseConfig *kubernetes.Config) *MetricsHandler {
+// NewMetricsHandler creates a new MetricsHandler with the provided Kubernetes client.
+func NewMetricsHandler(client *kubernetes.Client) *MetricsHandler {
 	return &MetricsHandler{
-		client:     client,
-		baseConfig: baseConfig,
+		client: client,
 	}
 }
 
@@ -111,7 +107,7 @@ func (h *MetricsHandler) GetNodeMetrics(ctx context.Context, request mcp.CallToo
 	// Use the appropriate client based on context
 	client := h.client
 	if params.Context != "" {
-		contextClient, err := kubernetes.NewClientWithContext(h.baseConfig, params.Context)
+		contextClient, err := h.client.WithContext(params.Context)
 		if err != nil {
 			return response.Errorf("failed to create client with context %q: %s", params.Context, err)
 		}
@@ -204,7 +200,7 @@ func (h *MetricsHandler) GetPodMetrics(ctx context.Context, request mcp.CallTool
 	// Use the appropriate client based on context
 	client := h.client
 	if params.Context != "" {
-		contextClient, err := kubernetes.NewClientWithContext(h.baseConfig, params.Context)
+		contextClient, err := h.client.WithContext(params.Context)
 		if err != nil {
 			return response.Errorf("failed to create client with context %s: %v", params.Context, err)
 		}
