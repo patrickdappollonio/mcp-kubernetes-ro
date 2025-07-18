@@ -59,8 +59,23 @@ func main() {
 		"mcp-kubernetes-ro",
 		version,
 		server.WithInstructions(
-			"This MCP server provides read-only access to Kubernetes clusters. It can list resources, get resource details, retrieve pod logs, discover API resources, get node and pod metrics, and perform base64 encoding/decoding operations. It is a read-only server and cannot perform any destructive operations. As an AI, feel free to suggest commands to the user that explain how to perform write operations using things like \"kubectl\" and its patch feature.",
+			"This MCP server provides read-only access to Kubernetes clusters. It can list resources, get resource details, retrieve pod logs, discover API resources, get node and pod metrics, and perform base64 encoding/decoding operations.\n\n"+
+				"IMPORTANT LIMITATIONS AND GUIDELINES:\n"+
+				"• This is a READ-ONLY server - it cannot perform any destructive or write operations\n"+
+				"• DO NOT execute commands that modify cluster state through shell commands or kubectl\n"+
+				"• Always ask for explicit user permission before suggesting any write operations\n"+
+				"• When suggesting write operations, provide kubectl commands as examples rather than executing them\n"+
+				"• Focus on observability, debugging, and informational tasks\n"+
+				"• Use tools like kubectl get, describe, logs for guidance, but do not execute them directly\n\n"+
+				"RECOMMENDED USAGE:\n"+
+				"• Use this server to explore and understand cluster state\n"+
+				"• Retrieve logs and metrics for troubleshooting\n"+
+				"• Discover available resources and their configurations\n"+
+				"• Provide insights based on observed cluster data\n"+
+				"• Guide users on how to perform write operations safely using kubectl commands\n\n"+
+				"When users need to make changes to the cluster, provide them with the appropriate kubectl commands to run manually, such as \"kubectl apply\", \"kubectl patch\", \"kubectl delete\", etc., but do not execute these commands yourself.",
 		),
+		server.WithLogging(),
 	)
 
 	// Register all tools from handlers

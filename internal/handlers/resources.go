@@ -353,7 +353,7 @@ func (h *ResourceHandler) GetTools() []MCPTool {
 	return []MCPTool{
 		NewMCPTool(
 			mcp.NewTool("list_resources",
-				mcp.WithDescription("List any Kubernetes resources by type with optional filtering, sorted newest first. Returns only metadata, apiVersion, and kind for lightweight responses. Use get_resource for full resource details. If you need a list of all resources, use the list_api_resources tool."),
+				mcp.WithDescription("List any Kubernetes resources by type with optional filtering, sorted newest first. Returns only metadata, apiVersion, and kind."),
 				mcp.WithString("resource_type",
 					mcp.Required(),
 					mcp.Description("The type of resource to list"),
