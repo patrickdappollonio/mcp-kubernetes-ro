@@ -324,6 +324,8 @@ func generateContinueToken(offset int, itemType, namespace string) string {
 		Type:      itemType,
 		Namespace: namespace,
 	}
+
+	//nolint:errchkjson // we control the struct and it's strongly typed
 	data, _ := json.Marshal(state)
 	return base64.URLEncoding.EncodeToString(data)
 }
@@ -336,19 +338,19 @@ func parseContinueToken(token string) (*PaginationState, error) {
 
 	data, err := base64.URLEncoding.DecodeString(token)
 	if err != nil {
-		return nil, fmt.Errorf("invalid continue token: %v", err)
+		return nil, fmt.Errorf("invalid continue token: %w", err)
 	}
 
 	var state PaginationState
 	if err := json.Unmarshal(data, &state); err != nil {
-		return nil, fmt.Errorf("invalid continue token format: %v", err)
+		return nil, fmt.Errorf("invalid continue token format: %w", err)
 	}
 
 	return &state, nil
 }
 
 // paginateItems applies client-side pagination to a slice of items
-func paginateItems(items []interface{}, limit int, offset int) ([]interface{}, bool) {
+func paginateItems(items []interface{}, limit, offset int) ([]interface{}, bool) {
 	if offset >= len(items) {
 		return []interface{}{}, false
 	}

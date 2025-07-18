@@ -300,7 +300,7 @@ type APIResource struct {
 // It discovers and returns information about all available Kubernetes API resources
 // in the cluster, similar to "kubectl api-resources". This is useful for understanding
 // what resource types are available and their capabilities.
-func (h *ResourceHandler) ListAPIResources(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func (h *ResourceHandler) ListAPIResources(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	lists, err := h.client.DiscoverResources(ctx)
 	if err != nil {
 		return response.Errorf("failed to discover API resources: %v", err)
@@ -368,7 +368,7 @@ type KubeContext struct {
 // It reads the kubeconfig file and returns information about all available
 // Kubernetes contexts. This helps users understand what clusters and configurations
 // are available for use with the context parameter in other tools.
-func (h *ResourceHandler) ListContexts(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func (h *ResourceHandler) ListContexts(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	contexts, err := h.listKubeContexts()
 	if err != nil {
 		return response.Errorf("failed to list contexts: %v", err)
@@ -412,7 +412,7 @@ func (h *ResourceHandler) listKubeContexts() ([]KubeContext, error) {
 		return nil, fmt.Errorf("failed to load kubeconfig: %w", err)
 	}
 
-	var contexts []KubeContext
+	contexts := make([]KubeContext, 0, len(rawConfig.Contexts))
 	for name, context := range rawConfig.Contexts {
 		kubeContext := KubeContext{
 			Name:      name,

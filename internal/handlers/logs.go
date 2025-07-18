@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -73,7 +74,7 @@ func (h *LogHandler) GetLogs(ctx context.Context, request mcp.CallToolRequest) (
 	}
 
 	if params.Name == "" {
-		return nil, fmt.Errorf("pod name is required")
+		return nil, errors.New("pod name is required")
 	}
 
 	// Use the appropriate client based on context

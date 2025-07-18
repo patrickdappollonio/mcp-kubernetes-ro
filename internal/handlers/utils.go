@@ -34,7 +34,7 @@ type DecodeBase64Params struct {
 // EncodeBase64 implements the encode_base64 MCP tool.
 // It encodes text data to base64 format, which is useful for creating or understanding
 // Kubernetes secrets and other base64-encoded resources.
-func (h *UtilsHandler) EncodeBase64(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func (h *UtilsHandler) EncodeBase64(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	var params EncodeBase64Params
 	if err := request.BindArguments(&params); err != nil {
 		return response.Errorf("failed to parse arguments: %s", err)
@@ -57,7 +57,7 @@ func (h *UtilsHandler) EncodeBase64(ctx context.Context, request mcp.CallToolReq
 // DecodeBase64 implements the decode_base64 MCP tool.
 // It decodes base64 data to text format, which is useful for reading the contents
 // of Kubernetes secrets and other base64-encoded resources.
-func (h *UtilsHandler) DecodeBase64(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func (h *UtilsHandler) DecodeBase64(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	var params DecodeBase64Params
 	if err := request.BindArguments(&params); err != nil {
 		return response.Errorf("failed to parse arguments: %s", err)

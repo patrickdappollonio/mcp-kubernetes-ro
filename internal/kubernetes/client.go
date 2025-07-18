@@ -23,7 +23,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/client-go/util/homedir"
 	metricsv1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
 	metricsClient "k8s.io/metrics/pkg/client/clientset/versioned"
 )
@@ -76,8 +75,8 @@ func NewClient(cfg *Config) (*Client, error) {
 //
 // The context parameter specifies which Kubernetes context from the kubeconfig
 // to use. If empty, it uses the current context from the kubeconfig file.
-func NewClientWithContext(cfg *Config, context string) (*Client, error) {
-	config, err := buildConfig(cfg.Kubeconfig, context)
+func NewClientWithContext(cfg *Config, contextName string) (*Client, error) {
+	config, err := buildConfig(cfg.Kubeconfig, contextName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build Kubernetes config: %w", err)
 	}
@@ -97,7 +96,7 @@ func NewClientWithContext(cfg *Config, context string) (*Client, error) {
 		return nil, fmt.Errorf("failed to create discovery client: %w", err)
 	}
 
-	metricsClient, err := metricsClient.NewForConfig(config)
+	metricsClientset, err := metricsClient.NewForConfig(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create metrics client: %w", err)
 	}
@@ -106,41 +105,36 @@ func NewClientWithContext(cfg *Config, context string) (*Client, error) {
 		clientset:       clientset,
 		dynamicClient:   dynamicClient,
 		discoveryClient: discoveryClient,
-		metricsClient:   metricsClient,
+		metricsClient:   metricsClientset,
 		config:          config,
 		namespace:       cfg.Namespace,
 	}, nil
 }
 
-func buildConfig(kubeconfig, context string) (*rest.Config, error) {
+func buildConfig(kubeconfig, contextName string) (*rest.Config, error) {
 	if kubeconfig == "" {
 		// Check KUBECONFIG environment variable first
 		if envKubeconfig := os.Getenv("KUBECONFIG"); envKubeconfig != "" {
 			kubeconfig = envKubeconfig
 		} else {
-			// Fall back to default location
-			if home := homedir.HomeDir(); home != "" {
-				kubeconfig = filepath.Join(home, ".kube", "config")
-			}
+			kubeconfig = filepath.Join(os.Getenv("HOME"), ".kube", "config")
 		}
 	}
 
-	if _, err := os.Stat(kubeconfig); os.IsNotExist(err) {
+	if kubeconfig == "" {
+		// No kubeconfig file specified, try in-cluster config
 		return rest.InClusterConfig()
 	}
 
-	configLoadingRules := &clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeconfig}
-	configOverrides := &clientcmd.ConfigOverrides{}
+	rules := clientcmd.NewDefaultClientConfigLoadingRules()
+	rules.ExplicitPath = kubeconfig
 
-	if context != "" {
-		configOverrides.CurrentContext = context
+	overrides := &clientcmd.ConfigOverrides{}
+	if contextName != "" {
+		overrides.CurrentContext = contextName
 	}
 
-	clientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
-		configLoadingRules,
-		configOverrides,
-	)
-
+	clientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, overrides)
 	return clientConfig.ClientConfig()
 }
 
@@ -190,7 +184,7 @@ func (c *Client) GetResource(ctx context.Context, gvr schema.GroupVersionResourc
 // DiscoverResources retrieves the list of available API resources from the cluster.
 // This is used to understand what resource types are available and their capabilities
 // (namespaced vs cluster-scoped, supported verbs, etc.).
-func (c *Client) DiscoverResources(ctx context.Context) ([]*metav1.APIResourceList, error) {
+func (c *Client) DiscoverResources(_ context.Context) ([]*metav1.APIResourceList, error) {
 	return c.discoveryClient.ServerPreferredResources()
 }
 
@@ -358,7 +352,7 @@ func (c *Client) GetPodLogsWithOptions(ctx context.Context, namespace, podName s
 	}
 
 	if namespace == "" {
-		return "", fmt.Errorf("namespace is required")
+		return "", errors.New("namespace is required")
 	}
 
 	logOptions := &corev1.PodLogOptions{}
@@ -415,15 +409,15 @@ func (c *Client) GetPodContainers(ctx context.Context, namespace, podName string
 	}
 
 	if namespace == "" {
-		return nil, fmt.Errorf("namespace is required")
+		return nil, errors.New("namespace is required")
 	}
 
 	pod, err := c.clientset.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get pod: %w", err)
+		return nil, fmt.Errorf("failed to get pod %q: %w", podName, err)
 	}
 
-	var containers []string
+	containers := make([]string, 0, len(pod.Spec.Containers))
 	for _, container := range pod.Spec.Containers {
 		containers = append(containers, container.Name)
 	}
@@ -507,12 +501,10 @@ func (c *Client) TestConnectivity(ctx context.Context) error {
 	// Note: This can have warnings (like deprecated APIs) but should not fail connectivity
 	resources, err := c.discoveryClient.ServerPreferredResources()
 	if err != nil {
-		// Check if we got partial results (warnings vs complete failure)
+		// Check if we got no results: this is likely a failure
 		if len(resources) == 0 {
 			return fmt.Errorf("failed to discover API resources: %w", err)
 		}
-		// If we got some resources, it's likely just warnings about deprecated APIs
-		fmt.Fprintf(os.Stderr, "Warning: Some API resources may be deprecated or unavailable: %v\n", err)
 	}
 
 	// Test 3: Try a simple API call to ensure we have basic permissions
@@ -522,7 +514,9 @@ func (c *Client) TestConnectivity(ctx context.Context) error {
 	}
 
 	// Log successful connectivity with some basic cluster info
-	fmt.Fprintf(os.Stderr, "✓ Successfully connected to Kubernetes cluster (version: %s, %d namespaces accessible)\n",
-		version.String(), len(namespaces.Items))
+	fmt.Fprintf(os.Stderr,
+		"✓ Successfully connected to Kubernetes cluster (version: %s, %d namespaces accessible)\n",
+		version.String(), len(namespaces.Items),
+	)
 	return nil
 }

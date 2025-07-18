@@ -42,10 +42,11 @@ func main() {
 	// prevent the MCP server from starting
 	fmt.Fprintln(os.Stderr, "Testing connectivity to Kubernetes cluster...")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
 	if err := client.TestConnectivity(ctx); err != nil {
+		cancel()
 		log.Fatalf("Failed to connect to Kubernetes cluster: %v\n\nPlease check:\n- Your kubeconfig file is valid\n- The cluster is accessible\n- You have the necessary RBAC permissions\n- The cluster is running and responding", err)
 	}
+	cancel() // Clean up the context
 	fmt.Fprintln(os.Stderr, "Connected to Kubernetes cluster, starting MCP server...")
 
 	// Create tool filter
@@ -96,7 +97,15 @@ func main() {
 		log.Printf("SSE endpoint: http://localhost%s/sse", addr)
 		log.Printf("Message endpoint: http://localhost%s/message", addr)
 
-		if err := http.ListenAndServe(addr, sseServer); err != nil {
+		httpServer := &http.Server{
+			Addr:         addr,
+			Handler:      sseServer,
+			ReadTimeout:  15 * time.Second,
+			WriteTimeout: 15 * time.Second,
+			IdleTimeout:  60 * time.Second,
+		}
+
+		if err := httpServer.ListenAndServe(); err != nil {
 			fmt.Printf("SSE server error: %v\n", err)
 		}
 	default:
