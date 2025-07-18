@@ -297,7 +297,8 @@ func (h *ResourceHandler) ListAPIResources(ctx context.Context, _ mcp.CallToolRe
 			continue
 		}
 
-		for _, resource := range list.APIResources {
+		for i := range list.APIResources {
+			resource := &list.APIResources[i]
 			if strings.Contains(resource.Name, "/") {
 				continue
 			}
@@ -332,7 +333,7 @@ func (h *ResourceHandler) ListAPIResources(ctx context.Context, _ mcp.CallToolRe
 // Kubernetes contexts. This helps users understand what clusters and configurations
 // are available for use with the context parameter in other tools.
 func (h *ResourceHandler) ListContexts(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	contexts, err := h.listKubeContexts()
+	contexts, err := h.client.ListContexts()
 	if err != nil {
 		return response.Errorf("failed to list contexts: %v", err)
 	}
@@ -343,11 +344,6 @@ func (h *ResourceHandler) ListContexts(_ context.Context, _ mcp.CallToolRequest)
 	}
 
 	return response.JSON(result)
-}
-
-// listKubeContexts delegates to the client's ListContexts method.
-func (h *ResourceHandler) listKubeContexts() ([]kubernetes.KubeContext, error) {
-	return h.client.ListContexts()
 }
 
 // GetTools returns all resource-related MCP tools provided by this handler.

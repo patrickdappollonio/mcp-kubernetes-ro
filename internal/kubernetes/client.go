@@ -132,7 +132,7 @@ func buildConfig(kubeconfig, contextName string) (*rest.Config, error) {
 
 	if resolvedKubeconfig == "" {
 		// No kubeconfig file specified, try in-cluster config
-		return rest.InClusterConfig()
+		return rest.InClusterConfig() //nolint:wrapcheck // kubernetes client-go errors are self-descriptive
 	}
 
 	rules := clientcmd.NewDefaultClientConfigLoadingRules()
@@ -144,7 +144,7 @@ func buildConfig(kubeconfig, contextName string) (*rest.Config, error) {
 	}
 
 	clientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, overrides)
-	return clientConfig.ClientConfig()
+	return clientConfig.ClientConfig() //nolint:wrapcheck // kubernetes client-go errors are self-descriptive
 }
 
 // WithContext returns a new client configured to use the specified Kubernetes context.
@@ -193,7 +193,7 @@ type KubeContext struct {
 func (c *Client) ListContexts() ([]KubeContext, error) {
 	kubeconfig := c.originalConfig.Kubeconfig
 	if kubeconfig == "" {
-		return nil, fmt.Errorf("no kubeconfig available: provide a kubeconfig file path for the MCP server")
+		return nil, errors.New("no kubeconfig available: provide a kubeconfig file path for the MCP server")
 	}
 
 	configLoadingRules := &clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeconfig}
@@ -242,6 +242,8 @@ func (c *Client) ListContexts() ([]KubeContext, error) {
 // The gvr parameter specifies the GroupVersionResource to list.
 // The namespace parameter is used for namespaced resources; leave empty for cluster-scoped resources.
 // The opts parameter provides filtering and pagination options.
+//
+//nolint:gocritic // opts is from external package, can't change signature
 func (c *Client) ListResources(ctx context.Context, gvr schema.GroupVersionResource, namespace string, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
 	if namespace == "" && c.namespace != "" {
 		namespace = c.namespace
@@ -254,7 +256,7 @@ func (c *Client) ListResources(ctx context.Context, gvr schema.GroupVersionResou
 		resourceInterface = c.dynamicClient.Resource(gvr)
 	}
 
-	return resourceInterface.List(ctx, opts)
+	return resourceInterface.List(ctx, opts) //nolint:wrapcheck // kubernetes API errors are self-descriptive
 }
 
 // GetResource retrieves a specific Kubernetes resource by name and type.
@@ -275,14 +277,14 @@ func (c *Client) GetResource(ctx context.Context, gvr schema.GroupVersionResourc
 		resourceInterface = c.dynamicClient.Resource(gvr)
 	}
 
-	return resourceInterface.Get(ctx, name, metav1.GetOptions{})
+	return resourceInterface.Get(ctx, name, metav1.GetOptions{}) //nolint:wrapcheck // kubernetes API errors are self-descriptive
 }
 
 // DiscoverResources retrieves the list of available API resources from the cluster.
 // This is used to understand what resource types are available and their capabilities
 // (namespaced vs cluster-scoped, supported verbs, etc.).
 func (c *Client) DiscoverResources(_ context.Context) ([]*metav1.APIResourceList, error) {
-	return c.discoveryClient.ServerPreferredResources()
+	return c.discoveryClient.ServerPreferredResources() //nolint:wrapcheck // kubernetes API errors are self-descriptive
 }
 
 // ResolveResourceType converts a user-friendly resource type name to a GroupVersionResource.
@@ -319,6 +321,7 @@ func (c *Client) ResolveResourceType(resourceType, apiVersion string) (schema.Gr
 			continue
 		}
 
+		//nolint:gocritic // copying API resource struct is acceptable for this use case
 		for _, resource := range list.APIResources {
 			// Skip subresources (those with '/' in the name)
 			if strings.Contains(resource.Name, "/") {
@@ -515,8 +518,8 @@ func (c *Client) GetPodContainers(ctx context.Context, namespace, podName string
 	}
 
 	containers := make([]string, 0, len(pod.Spec.Containers))
-	for _, container := range pod.Spec.Containers {
-		containers = append(containers, container.Name)
+	for i := range pod.Spec.Containers {
+		containers = append(containers, pod.Spec.Containers[i].Name)
 	}
 
 	return containers, nil
@@ -525,31 +528,35 @@ func (c *Client) GetPodContainers(ctx context.Context, namespace, podName string
 // GetNodeMetrics retrieves CPU and memory usage metrics for all nodes in the cluster.
 // Requires the metrics-server to be installed and running in the cluster.
 func (c *Client) GetNodeMetrics(ctx context.Context) (*metricsv1beta1.NodeMetricsList, error) {
-	return c.metricsClient.MetricsV1beta1().NodeMetricses().List(ctx, metav1.ListOptions{})
+	return c.metricsClient.MetricsV1beta1().NodeMetricses().List(ctx, metav1.ListOptions{}) //nolint:wrapcheck // kubernetes API errors are self-descriptive
 }
 
 // GetNodeMetricsWithOptions retrieves node metrics with pagination support.
 // This allows for controlled retrieval of large numbers of node metrics.
+//
+//nolint:gocritic // opts is from external package, can't change signature
 func (c *Client) GetNodeMetricsWithOptions(ctx context.Context, opts metav1.ListOptions) (*metricsv1beta1.NodeMetricsList, error) {
-	return c.metricsClient.MetricsV1beta1().NodeMetricses().List(ctx, opts)
+	return c.metricsClient.MetricsV1beta1().NodeMetricses().List(ctx, opts) //nolint:wrapcheck // kubernetes API errors are self-descriptive
 }
 
 // GetNodeMetricsByName retrieves metrics for a specific node by name.
 // Useful when you need metrics for just one node rather than all nodes.
 func (c *Client) GetNodeMetricsByName(ctx context.Context, nodeName string) (*metricsv1beta1.NodeMetrics, error) {
-	return c.metricsClient.MetricsV1beta1().NodeMetricses().Get(ctx, nodeName, metav1.GetOptions{})
+	return c.metricsClient.MetricsV1beta1().NodeMetricses().Get(ctx, nodeName, metav1.GetOptions{}) //nolint:wrapcheck // kubernetes API errors are self-descriptive
 }
 
 // GetPodMetrics retrieves CPU and memory usage metrics for all pods across all namespaces.
 // Requires the metrics-server to be installed and running in the cluster.
 func (c *Client) GetPodMetrics(ctx context.Context) (*metricsv1beta1.PodMetricsList, error) {
-	return c.metricsClient.MetricsV1beta1().PodMetricses("").List(ctx, metav1.ListOptions{})
+	return c.metricsClient.MetricsV1beta1().PodMetricses("").List(ctx, metav1.ListOptions{}) //nolint:wrapcheck // kubernetes API errors are self-descriptive
 }
 
 // GetPodMetricsWithOptions retrieves pod metrics with pagination support.
 // This allows for controlled retrieval of large numbers of pod metrics.
+//
+//nolint:gocritic // opts is from external package, can't change signature
 func (c *Client) GetPodMetricsWithOptions(ctx context.Context, opts metav1.ListOptions) (*metricsv1beta1.PodMetricsList, error) {
-	return c.metricsClient.MetricsV1beta1().PodMetricses("").List(ctx, opts)
+	return c.metricsClient.MetricsV1beta1().PodMetricses("").List(ctx, opts) //nolint:wrapcheck // kubernetes API errors are self-descriptive
 }
 
 // GetPodMetricsByNamespace retrieves metrics for all pods in a specific namespace.
@@ -559,13 +566,15 @@ func (c *Client) GetPodMetricsByNamespace(ctx context.Context, namespace string)
 	if namespace == "" && c.namespace != "" {
 		namespace = c.namespace
 	}
-	return c.metricsClient.MetricsV1beta1().PodMetricses(namespace).List(ctx, metav1.ListOptions{})
+	return c.metricsClient.MetricsV1beta1().PodMetricses(namespace).List(ctx, metav1.ListOptions{}) //nolint:wrapcheck // kubernetes API errors are self-descriptive
 }
 
 // GetPodMetricsByNamespaceWithOptions retrieves namespace-scoped pod metrics with pagination support.
 // Combines namespace filtering with pagination for efficient large-scale metrics retrieval.
+//
+//nolint:gocritic // opts is from external package, can't change signature
 func (c *Client) GetPodMetricsByNamespaceWithOptions(ctx context.Context, namespace string, opts metav1.ListOptions) (*metricsv1beta1.PodMetricsList, error) {
-	return c.metricsClient.MetricsV1beta1().PodMetricses(namespace).List(ctx, opts)
+	return c.metricsClient.MetricsV1beta1().PodMetricses(namespace).List(ctx, opts) //nolint:wrapcheck // kubernetes API errors are self-descriptive
 }
 
 // GetPodMetricsByName retrieves metrics for a specific pod by name and namespace.
@@ -574,7 +583,7 @@ func (c *Client) GetPodMetricsByName(ctx context.Context, namespace, podName str
 	if namespace == "" && c.namespace != "" {
 		namespace = c.namespace
 	}
-	return c.metricsClient.MetricsV1beta1().PodMetricses(namespace).Get(ctx, podName, metav1.GetOptions{})
+	return c.metricsClient.MetricsV1beta1().PodMetricses(namespace).Get(ctx, podName, metav1.GetOptions{}) //nolint:wrapcheck // kubernetes API errors are self-descriptive
 }
 
 // TestConnectivity performs a comprehensive connectivity check to verify the cluster

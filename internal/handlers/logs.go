@@ -185,7 +185,7 @@ func (h *LogHandler) GetPodContainers(ctx context.Context, request mcp.CallToolR
 	}
 
 	if params.Name == "" {
-		return nil, fmt.Errorf("pod name is required")
+		return nil, errors.New("pod name is required")
 	}
 
 	// Use the appropriate client based on context

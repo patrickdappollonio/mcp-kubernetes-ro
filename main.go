@@ -76,7 +76,9 @@ func main() {
 
 	// Register tools from handlers
 	for _, handler := range allHandlers {
-		for _, mcpTool := range handler.GetTools() {
+		for i := range handler.GetTools() {
+			mcpTool := &handler.GetTools()[i]
+
 			if tool := mcpTool.Tool().Name; filter.IsDisabled(tool) {
 				fmt.Fprintf(os.Stderr, "Skipping disabled tool: %q\n", tool)
 				continue

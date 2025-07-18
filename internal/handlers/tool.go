@@ -19,6 +19,8 @@ type MCPTool struct {
 // NewMCPTool creates a new MCPTool with the given tool definition and handler function.
 // The tool parameter defines the MCP tool specification (name, description, input schema),
 // while the handler parameter provides the implementation that processes requests.
+//
+//nolint:gocritic // Using value semantics for encapsulation
 func NewMCPTool(tool mcp.Tool, handler func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) MCPTool {
 	return MCPTool{
 		tool:    tool,
@@ -29,6 +31,8 @@ func NewMCPTool(tool mcp.Tool, handler func(context.Context, mcp.CallToolRequest
 // Tool returns the MCP tool definition containing the tool's metadata and schema.
 // This is used by the MCP server to register the tool and provide information
 // to clients about available tools and their parameters.
+//
+//nolint:gocritic // Using value semantics for encapsulation
 func (t MCPTool) Tool() mcp.Tool {
 	return t.tool
 }
@@ -36,6 +40,8 @@ func (t MCPTool) Tool() mcp.Tool {
 // Handler returns the tool handler function that processes incoming requests.
 // The handler function takes a context and CallToolRequest, and returns either
 // a successful result or an error.
+//
+//nolint:gocritic // Using value semantics for encapsulation
 func (t MCPTool) Handler() func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return t.handler
 }

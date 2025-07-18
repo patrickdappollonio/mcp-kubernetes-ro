@@ -134,8 +134,8 @@ func (h *MetricsHandler) GetNodeMetrics(ctx context.Context, request mcp.CallToo
 
 	// Convert to interface slice for client-side pagination
 	allItems := make([]interface{}, len(nodeMetricsList.Items))
-	for i, nodeMetrics := range nodeMetricsList.Items {
-		allItems[i] = nodeMetrics
+	for i := range nodeMetricsList.Items {
+		allItems[i] = nodeMetricsList.Items[i]
 	}
 
 	// Sort by timestamp (newest first) for consistent ordering
@@ -236,8 +236,8 @@ func (h *MetricsHandler) GetPodMetrics(ctx context.Context, request mcp.CallTool
 
 	// Convert to interface slice for client-side pagination
 	allItems := make([]interface{}, len(podMetricsList.Items))
-	for i, podMetrics := range podMetricsList.Items {
-		allItems[i] = podMetrics
+	for i := range podMetricsList.Items {
+		allItems[i] = podMetricsList.Items[i]
 	}
 
 	// Sort by timestamp (newest first) for consistent ordering

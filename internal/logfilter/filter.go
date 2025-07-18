@@ -213,7 +213,7 @@ func parseDuration(s string) (time.Duration, error) {
 	}
 
 	// Standard duration parsing
-	return time.ParseDuration(s)
+	return time.ParseDuration(s) //nolint:wrapcheck // standard library errors are self-descriptive
 }
 
 // ValidateFilterOptions validates the filter options for correctness.
