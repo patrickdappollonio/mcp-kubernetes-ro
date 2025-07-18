@@ -79,13 +79,9 @@ func (h *ResourceHandler) ListResources(ctx context.Context, request mcp.CallToo
 	}
 
 	// Use the appropriate client based on context
-	client := h.client
-	if params.Context != "" {
-		contextClient, err := h.client.WithContext(params.Context)
-		if err != nil {
-			return response.Errorf("failed to create client with context %s: %v", params.Context, err)
-		}
-		client = contextClient
+	client, err := h.client.ForContext(params.Context)
+	if err != nil {
+		return response.Errorf("failed to create client with context %s: %v", params.Context, err)
 	}
 
 	gvr, err := client.ResolveResourceType(params.ResourceType, params.APIVersion)
@@ -192,13 +188,9 @@ func (h *ResourceHandler) GetResource(ctx context.Context, request mcp.CallToolR
 	}
 
 	// Use the appropriate client based on context
-	client := h.client
-	if params.Context != "" {
-		contextClient, err := h.client.WithContext(params.Context)
-		if err != nil {
-			return response.Errorf("failed to create client with context %s: %v", params.Context, err)
-		}
-		client = contextClient
+	client, err := h.client.ForContext(params.Context)
+	if err != nil {
+		return response.Errorf("failed to create client with context %s: %v", params.Context, err)
 	}
 
 	gvr, err := client.ResolveResourceType(params.ResourceType, params.APIVersion)

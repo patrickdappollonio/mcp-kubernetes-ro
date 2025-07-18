@@ -105,13 +105,9 @@ func (h *MetricsHandler) GetNodeMetrics(ctx context.Context, request mcp.CallToo
 	}
 
 	// Use the appropriate client based on context
-	client := h.client
-	if params.Context != "" {
-		contextClient, err := h.client.WithContext(params.Context)
-		if err != nil {
-			return response.Errorf("failed to create client with context %q: %s", params.Context, err)
-		}
-		client = contextClient
+	client, err := h.client.ForContext(params.Context)
+	if err != nil {
+		return response.Errorf("failed to create client with context %q: %s", params.Context, err)
 	}
 
 	if params.NodeName != "" {
@@ -198,13 +194,9 @@ func (h *MetricsHandler) GetPodMetrics(ctx context.Context, request mcp.CallTool
 	}
 
 	// Use the appropriate client based on context
-	client := h.client
-	if params.Context != "" {
-		contextClient, err := h.client.WithContext(params.Context)
-		if err != nil {
-			return response.Errorf("failed to create client with context %s: %v", params.Context, err)
-		}
-		client = contextClient
+	client, err := h.client.ForContext(params.Context)
+	if err != nil {
+		return response.Errorf("failed to create client with context %s: %v", params.Context, err)
 	}
 
 	if params.PodName != "" {
@@ -226,7 +218,6 @@ func (h *MetricsHandler) GetPodMetrics(ctx context.Context, request mcp.CallTool
 
 	// Always fetch all pod metrics from the server
 	var podMetricsList *metricsv1beta1.PodMetricsList
-	var err error
 
 	if params.Namespace != "" {
 		// Get pod metrics for specific namespace

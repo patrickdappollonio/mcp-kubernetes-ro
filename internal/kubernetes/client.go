@@ -157,6 +157,16 @@ func (c *Client) WithContext(contextName string) (*Client, error) {
 	return NewClientWithContext(c.originalConfig, contextName)
 }
 
+// ForContext returns a new client configured for the specified Kubernetes context.
+// If contextName is empty, it returns the current client unchanged.
+// This is a convenience method for handlers that need to conditionally switch contexts.
+func (c *Client) ForContext(contextName string) (*Client, error) {
+	if contextName == "" {
+		return c, nil
+	}
+	return c.WithContext(contextName)
+}
+
 // KubeContext represents a Kubernetes context from the kubeconfig file.
 // It contains the configuration needed to connect to a specific cluster
 // with specific user credentials and default namespace.

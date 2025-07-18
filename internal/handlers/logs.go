@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -47,7 +46,7 @@ func (h *LogHandler) GetLogs(ctx context.Context, request mcp.CallToolRequest) (
 		Context string `json:"context"`
 
 		// MaxLines limits the number of log lines to retrieve.
-		MaxLines string `json:"max_lines"`
+		MaxLines int `json:"max_lines"`
 
 		// GrepInclude contains comma-separated patterns that lines must match to be included.
 		GrepInclude string `json:"grep_include"`
@@ -74,22 +73,15 @@ func (h *LogHandler) GetLogs(ctx context.Context, request mcp.CallToolRequest) (
 	}
 
 	// Use the appropriate client based on context
-	client := h.client
-	if params.Context != "" {
-		contextClient, err := h.client.WithContext(params.Context)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create client with context %s: %w", params.Context, err)
-		}
-		client = contextClient
+	client, err := h.client.ForContext(params.Context)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create client with context %s: %w", params.Context, err)
 	}
 
-	// Parse max lines
+	// Set max lines
 	var maxLines *int64
-	if params.MaxLines != "" {
-		lines, err := strconv.ParseInt(params.MaxLines, 10, 64)
-		if err != nil {
-			return nil, fmt.Errorf("invalid max_lines value: %w", err)
-		}
+	if params.MaxLines > 0 {
+		lines := int64(params.MaxLines)
 		maxLines = &lines
 	}
 
@@ -197,13 +189,9 @@ func (h *LogHandler) GetPodContainers(ctx context.Context, request mcp.CallToolR
 	}
 
 	// Use the appropriate client based on context
-	client := h.client
-	if params.Context != "" {
-		contextClient, err := h.client.WithContext(params.Context)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create client with context %s: %w", params.Context, err)
-		}
-		client = contextClient
+	client, err := h.client.ForContext(params.Context)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create client with context %s: %w", params.Context, err)
 	}
 
 	containers, err := client.GetPodContainers(ctx, params.Namespace, params.Name)
@@ -238,7 +226,7 @@ func (h *LogHandler) GetTools() []MCPTool {
 				mcp.WithString("context",
 					mcp.Description("Kubernetes context to use (defaults to current context from kubeconfig)"),
 				),
-				mcp.WithString("max_lines",
+				mcp.WithNumber("max_lines",
 					mcp.Description("Maximum number of lines to retrieve"),
 				),
 				mcp.WithString("grep_include",
