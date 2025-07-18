@@ -33,6 +33,12 @@ Alternatively, you can use Homebrew in macOS or Linux to install it:
 brew install patrickdappollonio/tap/mcp-kubernetes-ro
 ```
 
+You can also use it as an NPM package: just make sure the configuration is given to your AI agent:
+
+```bash
+npx -y @patrickdappollonio/mcp-kubernetes-ro
+```
+
 Finally, Docker users can use the prebuilt image from the GitHub Container Registry:
 
 ```bash
@@ -70,6 +76,36 @@ Add the following configuration to your editor's settings to use `mcp-kubernetes
 ```
 
 You can use `mcp-kubernetes-ro` directly from your `$PATH` as shown above, or provide the full path to the binary (e.g., `/path/to/mcp-kubernetes-ro`).
+
+You can also simplify the installation process by using it as an `npx` package:
+
+```json5
+{
+  "mcpServers": {
+    "kubernetes-ro": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@patrickdappollonio/mcp-kubernetes-ro"
+        // Uncomment and modify as needed:
+        // "--kubeconfig=/path/to/kubeconfig",
+        // "--namespace=default",
+        // "--transport=stdio",
+        // "--port=8080",
+        // "--disabled-tools=get_logs,decode_base64"
+      ],
+      "env": {
+        // Set KUBECONFIG environment variable if needed:
+        // "KUBECONFIG": "/path/to/kubeconfig",
+        // Set MCP_KUBERNETES_RO_DISABLED_TOOLS environment variable if needed:
+        // "MCP_KUBERNETES_RO_DISABLED_TOOLS": "get_logs,decode_base64",
+        // Or use generic DISABLED_TOOLS environment variable:
+        // "DISABLED_TOOLS": "get_logs,decode_base64"
+      }
+    }
+  }
+}
+```
 
 And this is how to leverage the Docker image instead:
 

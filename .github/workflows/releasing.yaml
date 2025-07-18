@@ -38,3 +38,23 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish to npm
+        uses: evg4b/goreleaser-npm-publisher-action@v1
+        with:
+          prefix: '@patrickdappollonio'
+          token: ${{ secrets.NPM_AUTH_TOKEN }}
+          description: "A read-only Kubernetes MCP server: list resources, get resource details, retrieve pod logs, discover API resources, and perform base64 encoding/decoding operations - all while maintaining security through read-only access."
+          files: |-
+            LICENSE
+            README.md
+            kubernetes-ro.png
+          keywords: |-
+            mcp
+            mcp-server-debug
+            debug-http-headers
+            debug-dns-requests
+            debug-tls-certificates
+            http
+            https
+            cli
+            devtool
