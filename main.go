@@ -8,12 +8,12 @@ import (
 	"net/http"
 	"os"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/patrickdappollonio/mcp-kubernetes-ro/internal/handlers"
 	"github.com/patrickdappollonio/mcp-kubernetes-ro/internal/kubernetes"
+	"github.com/patrickdappollonio/mcp-kubernetes-ro/internal/toolfilter"
 )
 
 var (
@@ -48,29 +48,8 @@ func main() {
 	}
 	fmt.Fprintln(os.Stderr, "Connected to Kubernetes cluster, starting MCP server...")
 
-	// Check environment variable if flag not set
-	disabledToolsValue := *disabledTools
-	if disabledToolsValue == "" {
-		disabledToolsValue = os.Getenv("DISABLED_TOOLS")
-	}
-
-	// Parse disabled tools
-	var disabledToolsList []string
-	if disabledToolsValue != "" {
-		disabledToolsList = strings.FieldsFunc(disabledToolsValue, func(r rune) bool {
-			return r == ',' || r == ' ' || r == '\t' || r == '\n' || r == '\r'
-		})
-	}
-
-	// Helper function to check if tool is disabled
-	isToolDisabled := func(toolName string) bool {
-		for _, disabled := range disabledToolsList {
-			if strings.EqualFold(toolName, disabled) {
-				return true
-			}
-		}
-		return false
-	}
+	// Create tool filter
+	filter := toolfilter.NewFilter(*disabledTools)
 
 	resourceHandler := handlers.NewResourceHandler(client, kubeConfig)
 	logHandler := handlers.NewLogHandler(client, kubeConfig)
@@ -96,7 +75,7 @@ func main() {
 	for _, handler := range allHandlers {
 		for _, mcpTool := range handler.GetTools() {
 			toolName := mcpTool.Tool().Name
-			if isToolDisabled(toolName) {
+			if filter.IsDisabled(toolName) {
 				fmt.Fprintf(os.Stderr, "Skipping disabled tool: %q\n", toolName)
 				continue
 			}
