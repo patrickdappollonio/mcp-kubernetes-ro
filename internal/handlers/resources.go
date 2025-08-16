@@ -62,6 +62,10 @@ type ListResourcesParams struct {
 	// Continue is a pagination token from a previous response.
 	// Used to retrieve the next page of results.
 	Continue string `json:"continue,omitempty"`
+
+	// TitleOnly when true (default), returns only metadata.name for each resource.
+	// When false, returns metadata, apiVersion, and kind.
+	TitleOnly *bool `json:"title_only,omitempty"`
 }
 
 // ListResources implements the list_resources MCP tool.
@@ -104,10 +108,20 @@ func (h *ResourceHandler) ListResources(ctx context.Context, request mcp.CallToo
 		return response.Errorf("failed to list resources: %v", err)
 	}
 
-	// Extract metadata-only resource summaries
+	// Determine whether to show title only (default to true)
+	titleOnly := true
+	if params.TitleOnly != nil {
+		titleOnly = *params.TitleOnly
+	}
+
+	// Extract resource summaries based on title_only setting
 	items := make([]map[string]interface{}, len(resources.Items))
 	for i, resource := range resources.Items {
-		items[i] = extractResourceSummary(&resource)
+		if titleOnly {
+			items[i] = extractResourceTitle(&resource)
+		} else {
+			items[i] = extractResourceSummary(&resource)
+		}
 	}
 
 	// Only sort if not using pagination (no continue token and no limit)
@@ -206,6 +220,19 @@ func (h *ResourceHandler) GetResource(ctx context.Context, request mcp.CallToolR
 	return response.JSON(resource.Object)
 }
 
+// extractResourceTitle extracts only the resource name for title-only listing operations.
+// It returns just the metadata.name field, providing the most minimal response
+// when only resource identification is needed.
+func extractResourceTitle(resource *unstructured.Unstructured) map[string]interface{} {
+	summary := make(map[string]interface{})
+
+	if name := resource.GetName(); name != "" {
+		summary["name"] = name
+	}
+
+	return summary
+}
+
 // extractResourceSummary extracts only essential fields from a resource for list operations.
 // It returns a lightweight summary containing just metadata, apiVersion, and kind,
 // which is sufficient for most listing and browsing operations while minimizing
@@ -283,67 +310,144 @@ type APIResource struct {
 // It discovers and returns information about all available Kubernetes API resources
 // in the cluster, similar to "kubectl api-resources". This is useful for understanding
 // what resource types are available and their capabilities.
-func (h *ResourceHandler) ListAPIResources(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func (h *ResourceHandler) ListAPIResources(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	var params struct {
+		// TitleOnly when true (default), returns only resource names.
+		// When false, returns complete API resource information.
+		TitleOnly *bool `json:"title_only,omitempty"`
+	}
+
+	if err := request.BindArguments(&params); err != nil {
+		return response.Errorf("failed to parse arguments: %s", err)
+	}
 	lists, err := h.client.DiscoverResources(ctx)
 	if err != nil {
 		return response.Errorf("failed to discover API resources: %v", err)
 	}
 
-	var resources []APIResource
+	// Determine whether to show title only (default to true)
+	titleOnly := true
+	if params.TitleOnly != nil {
+		titleOnly = *params.TitleOnly
+	}
 
-	for _, list := range lists {
-		_, err := schema.ParseGroupVersion(list.GroupVersion)
-		if err != nil {
-			continue
-		}
+	if titleOnly {
+		// Return only resource names
+		var resourceNames []string
 
-		for i := range list.APIResources {
-			resource := &list.APIResources[i]
-			if strings.Contains(resource.Name, "/") {
+		for _, list := range lists {
+			_, err := schema.ParseGroupVersion(list.GroupVersion)
+			if err != nil {
 				continue
 			}
 
-			resources = append(resources, APIResource{
-				Name:         resource.Name,
-				SingularName: resource.SingularName,
-				Namespaced:   resource.Namespaced,
-				Kind:         resource.Kind,
-				Verbs:        resource.Verbs,
-				ShortNames:   resource.ShortNames,
-				APIVersion:   list.GroupVersion,
-				Categories:   resource.Categories,
-			})
+			for i := range list.APIResources {
+				resource := &list.APIResources[i]
+				if strings.Contains(resource.Name, "/") {
+					continue
+				}
+				resourceNames = append(resourceNames, resource.Name)
+			}
 		}
+
+		sort.Strings(resourceNames)
+
+		result := map[string]interface{}{
+			"resources": resourceNames,
+			"count":     len(resourceNames),
+		}
+
+		return response.JSON(result)
+	} else {
+		// Return full API resource information
+		var resources []APIResource
+
+		for _, list := range lists {
+			_, err := schema.ParseGroupVersion(list.GroupVersion)
+			if err != nil {
+				continue
+			}
+
+			for i := range list.APIResources {
+				resource := &list.APIResources[i]
+				if strings.Contains(resource.Name, "/") {
+					continue
+				}
+
+				resources = append(resources, APIResource{
+					Name:         resource.Name,
+					SingularName: resource.SingularName,
+					Namespaced:   resource.Namespaced,
+					Kind:         resource.Kind,
+					Verbs:        resource.Verbs,
+					ShortNames:   resource.ShortNames,
+					APIVersion:   list.GroupVersion,
+					Categories:   resource.Categories,
+				})
+			}
+		}
+
+		sort.Slice(resources, func(i, j int) bool {
+			return resources[i].Name < resources[j].Name
+		})
+
+		result := map[string]interface{}{
+			"resources": resources,
+			"count":     len(resources),
+		}
+
+		return response.JSON(result)
 	}
-
-	sort.Slice(resources, func(i, j int) bool {
-		return resources[i].Name < resources[j].Name
-	})
-
-	result := map[string]interface{}{
-		"resources": resources,
-		"count":     len(resources),
-	}
-
-	return response.JSON(result)
 }
 
 // ListContexts implements the list_contexts MCP tool.
 // It reads the kubeconfig file and returns information about all available
 // Kubernetes contexts. This helps users understand what clusters and configurations
 // are available for use with the context parameter in other tools.
-func (h *ResourceHandler) ListContexts(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func (h *ResourceHandler) ListContexts(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	var params struct {
+		// TitleOnly when true (default), returns only context names.
+		// When false, returns complete context information.
+		TitleOnly *bool `json:"title_only,omitempty"`
+	}
+
+	if err := request.BindArguments(&params); err != nil {
+		return response.Errorf("failed to parse arguments: %s", err)
+	}
+
 	contexts, err := h.client.ListContexts()
 	if err != nil {
 		return response.Errorf("failed to list contexts: %v", err)
 	}
 
-	result := map[string]interface{}{
-		"contexts": contexts,
-		"count":    len(contexts),
+	// Determine whether to show title only (default to true)
+	titleOnly := true
+	if params.TitleOnly != nil {
+		titleOnly = *params.TitleOnly
 	}
 
-	return response.JSON(result)
+	if titleOnly {
+		// Return only context names
+		var contextNames []string
+		for _, context := range contexts {
+			contextNames = append(contextNames, context.Name)
+		}
+
+		result := map[string]interface{}{
+			"contexts": contextNames,
+			"count":    len(contextNames),
+		}
+
+		return response.JSON(result)
+	} else {
+		// Return complete context information
+		result := map[string]interface{}{
+			"contexts": contexts,
+			"count":    len(contexts),
+		}
+
+		return response.JSON(result)
+	}
 }
 
 // GetTools returns all resource-related MCP tools provided by this handler.
@@ -353,7 +457,7 @@ func (h *ResourceHandler) GetTools() []MCPTool {
 	return []MCPTool{
 		NewMCPTool(
 			mcp.NewTool("list_resources",
-				mcp.WithDescription("List any Kubernetes resources by type with optional filtering, sorted newest first. Returns only metadata, apiVersion, and kind."),
+				mcp.WithDescription("List any Kubernetes resources by type with optional filtering, sorted newest first. Returns only resource names by default (title_only=true), or metadata, apiVersion, and kind when title_only=false."),
 				mcp.WithString("resource_type",
 					mcp.Required(),
 					mcp.Description("The type of resource to list"),
@@ -378,6 +482,9 @@ func (h *ResourceHandler) GetTools() []MCPTool {
 				),
 				mcp.WithString("continue",
 					mcp.Description("Continue token for pagination (from previous response)"),
+				),
+				mcp.WithBoolean("title_only",
+					mcp.Description("When true (default), returns only resource names. When false, returns metadata, apiVersion, and kind"),
 				),
 			),
 			h.ListResources,
@@ -407,13 +514,19 @@ func (h *ResourceHandler) GetTools() []MCPTool {
 		),
 		NewMCPTool(
 			mcp.NewTool("list_api_resources",
-				mcp.WithDescription("List available Kubernetes API resources with their details (similar to kubectl api-resources)"),
+				mcp.WithDescription("List available Kubernetes API resources. Returns only resource names by default (title_only=true), or complete details when title_only=false (similar to kubectl api-resources)"),
+				mcp.WithBoolean("title_only",
+					mcp.Description("When true (default), returns only resource names. When false, returns complete API resource details"),
+				),
 			),
 			h.ListAPIResources,
 		),
 		NewMCPTool(
 			mcp.NewTool("list_contexts",
-				mcp.WithDescription("List available Kubernetes contexts from the kubeconfig file"),
+				mcp.WithDescription("List available Kubernetes contexts from the kubeconfig file. Returns only context names by default (title_only=true), or complete context details when title_only=false"),
+				mcp.WithBoolean("title_only",
+					mcp.Description("When true (default), returns only context names. When false, returns complete context information"),
+				),
 			),
 			h.ListContexts,
 		),

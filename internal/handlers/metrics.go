@@ -68,6 +68,10 @@ type GetNodeMetricsParams struct {
 	// Continue is a pagination token from a previous response.
 	// Used to retrieve the next page of results.
 	Continue string `json:"continue,omitempty"`
+
+	// TitleOnly when true, returns only node names.
+	// When false (default), returns complete node metrics information.
+	TitleOnly *bool `json:"title_only,omitempty"`
 }
 
 // GetPodMetricsParams defines the parameters for the get_pod_metrics MCP tool.
@@ -92,6 +96,10 @@ type GetPodMetricsParams struct {
 	// Continue is a pagination token from a previous response.
 	// Used to retrieve the next page of results.
 	Continue string `json:"continue,omitempty"`
+
+	// TitleOnly when true, returns only pod names.
+	// When false (default), returns complete pod metrics information.
+	TitleOnly *bool `json:"title_only,omitempty"`
 }
 
 // GetNodeMetrics implements the get_node_metrics MCP tool.
@@ -110,6 +118,12 @@ func (h *MetricsHandler) GetNodeMetrics(ctx context.Context, request mcp.CallToo
 		return response.Errorf("failed to create client with context %q: %s", params.Context, err)
 	}
 
+	// Determine whether to show title only (default to false for metrics)
+	titleOnly := false
+	if params.TitleOnly != nil {
+		titleOnly = *params.TitleOnly
+	}
+
 	if params.NodeName != "" {
 		// Get specific node metrics
 		nodeMetrics, err := client.GetNodeMetricsByName(ctx, params.NodeName)
@@ -120,7 +134,14 @@ func (h *MetricsHandler) GetNodeMetrics(ctx context.Context, request mcp.CallToo
 			return response.Errorf("failed to get node metrics for %s: %v", params.NodeName, err)
 		}
 
-		return response.JSON(nodeMetrics)
+		if titleOnly {
+			result := map[string]interface{}{
+				"name": nodeMetrics.Name,
+			}
+			return response.JSON(result)
+		} else {
+			return response.JSON(nodeMetrics)
+		}
 	}
 
 	// Always fetch all node metrics from the server
@@ -130,6 +151,56 @@ func (h *MetricsHandler) GetNodeMetrics(ctx context.Context, request mcp.CallToo
 			return response.Errorf("%s", formatMetricsServerError(err))
 		}
 		return response.Errorf("failed to get node metrics: %v", err)
+	}
+
+	if titleOnly {
+		// Return only node names
+		var nodeNames []string
+		for _, nodeMetrics := range nodeMetricsList.Items {
+			nodeNames = append(nodeNames, nodeMetrics.Name)
+		}
+
+		// Sort names alphabetically for consistency
+		sort.Strings(nodeNames)
+
+		// Handle pagination for names only
+		if params.Limit > 0 {
+			paginationState, err := parseContinueToken(params.Continue)
+			if err != nil {
+				return response.Errorf("invalid continue token: %v", err)
+			}
+
+			// Convert to interface slice for pagination
+			allItems := make([]interface{}, len(nodeNames))
+			for i, name := range nodeNames {
+				allItems[i] = name
+			}
+
+			paginatedItems, hasMore := paginateItems(allItems, params.Limit, paginationState.Offset)
+
+			result := map[string]interface{}{
+				"kind":       "NodeMetricsList",
+				"apiVersion": "metrics.k8s.io/v1beta1",
+				"count":      len(paginatedItems),
+				"items":      paginatedItems,
+			}
+
+			if hasMore {
+				nextOffset := paginationState.Offset + params.Limit
+				result["continue"] = generateContinueToken(nextOffset, "node", "")
+			}
+
+			return response.JSON(result)
+		} else {
+			result := map[string]interface{}{
+				"kind":       "NodeMetricsList",
+				"apiVersion": "metrics.k8s.io/v1beta1",
+				"count":      len(nodeNames),
+				"items":      nodeNames,
+			}
+
+			return response.JSON(result)
+		}
 	}
 
 	// Convert to interface slice for client-side pagination
@@ -199,6 +270,12 @@ func (h *MetricsHandler) GetPodMetrics(ctx context.Context, request mcp.CallTool
 		return response.Errorf("failed to create client with context %s: %v", params.Context, err)
 	}
 
+	// Determine whether to show title only (default to false for metrics)
+	titleOnly := false
+	if params.TitleOnly != nil {
+		titleOnly = *params.TitleOnly
+	}
+
 	if params.PodName != "" {
 		// Get specific pod metrics
 		if params.Namespace == "" {
@@ -213,7 +290,15 @@ func (h *MetricsHandler) GetPodMetrics(ctx context.Context, request mcp.CallTool
 			return response.Errorf("failed to get pod metrics for %s/%s: %v", params.Namespace, params.PodName, err)
 		}
 
-		return response.JSON(podMetrics)
+		if titleOnly {
+			result := map[string]interface{}{
+				"name":      podMetrics.Name,
+				"namespace": podMetrics.Namespace,
+			}
+			return response.JSON(result)
+		} else {
+			return response.JSON(podMetrics)
+		}
 	}
 
 	// Always fetch all pod metrics from the server
@@ -232,6 +317,80 @@ func (h *MetricsHandler) GetPodMetrics(ctx context.Context, request mcp.CallTool
 			return response.Errorf("%s", formatMetricsServerError(err))
 		}
 		return response.Errorf("failed to get pod metrics: %v", err)
+	}
+
+	if titleOnly {
+		// Return only pod names with namespaces
+		type PodName struct {
+			Name      string `json:"name"`
+			Namespace string `json:"namespace"`
+		}
+		var podNames []PodName
+		for _, podMetrics := range podMetricsList.Items {
+			podNames = append(podNames, PodName{
+				Name:      podMetrics.Name,
+				Namespace: podMetrics.Namespace,
+			})
+		}
+
+		// Sort by namespace then name for consistency
+		sort.Slice(podNames, func(i, j int) bool {
+			if podNames[i].Namespace != podNames[j].Namespace {
+				return podNames[i].Namespace < podNames[j].Namespace
+			}
+			return podNames[i].Name < podNames[j].Name
+		})
+
+		// Handle pagination for names only
+		if params.Limit > 0 {
+			paginationState, err := parseContinueToken(params.Continue)
+			if err != nil {
+				return response.Errorf("invalid continue token: %v", err)
+			}
+
+			// Validate that the continue token is for the same request type
+			if paginationState.Type != "" && paginationState.Type != "pod" {
+				return response.Error("continue token is not valid for pod metrics")
+			}
+
+			// Reset pagination if namespace context has changed
+			if paginationState.Namespace != params.Namespace {
+				paginationState.Offset = 0
+			}
+
+			// Convert to interface slice for pagination
+			allItems := make([]interface{}, len(podNames))
+			for i, podName := range podNames {
+				allItems[i] = podName
+			}
+
+			paginatedItems, hasMore := paginateItems(allItems, params.Limit, paginationState.Offset)
+
+			result := map[string]interface{}{
+				"kind":       "PodMetricsList",
+				"apiVersion": "metrics.k8s.io/v1beta1",
+				"namespace":  params.Namespace,
+				"count":      len(paginatedItems),
+				"items":      paginatedItems,
+			}
+
+			if hasMore {
+				nextOffset := paginationState.Offset + params.Limit
+				result["continue"] = generateContinueToken(nextOffset, "pod", params.Namespace)
+			}
+
+			return response.JSON(result)
+		} else {
+			result := map[string]interface{}{
+				"kind":       "PodMetricsList",
+				"apiVersion": "metrics.k8s.io/v1beta1",
+				"namespace":  params.Namespace,
+				"count":      len(podNames),
+				"items":      podNames,
+			}
+
+			return response.JSON(result)
+		}
 	}
 
 	// Convert to interface slice for client-side pagination
@@ -359,7 +518,7 @@ func (h *MetricsHandler) GetTools() []MCPTool {
 	return []MCPTool{
 		NewMCPTool(
 			mcp.NewTool("get_node_metrics",
-				mcp.WithDescription("Get node metrics (CPU and memory usage)"),
+				mcp.WithDescription("Get node metrics (CPU and memory usage). Returns complete metrics by default (title_only=false), or only node names when title_only=true"),
 				mcp.WithString("node_name",
 					mcp.Description("Specific node name to get metrics for (optional - if not provided, returns metrics for all nodes)"),
 				),
@@ -372,12 +531,15 @@ func (h *MetricsHandler) GetTools() []MCPTool {
 				mcp.WithString("continue",
 					mcp.Description("Continue token for pagination (optional - from previous response)"),
 				),
+				mcp.WithBoolean("title_only",
+					mcp.Description("When true, returns only node names. When false (default), returns complete node metrics"),
+				),
 			),
 			h.GetNodeMetrics,
 		),
 		NewMCPTool(
 			mcp.NewTool("get_pod_metrics",
-				mcp.WithDescription("Get pod metrics (CPU and memory usage)"),
+				mcp.WithDescription("Get pod metrics (CPU and memory usage). Returns complete metrics by default (title_only=false), or only pod names with namespaces when title_only=true"),
 				mcp.WithString("namespace",
 					mcp.Description("Namespace to get pod metrics from (optional - if not provided, returns metrics for all pods)"),
 				),
@@ -392,6 +554,9 @@ func (h *MetricsHandler) GetTools() []MCPTool {
 				),
 				mcp.WithString("continue",
 					mcp.Description("Continue token for pagination (optional - from previous response)"),
+				),
+				mcp.WithBoolean("title_only",
+					mcp.Description("When true, returns only pod names with namespaces. When false (default), returns complete pod metrics"),
 				),
 			),
 			h.GetPodMetrics,
