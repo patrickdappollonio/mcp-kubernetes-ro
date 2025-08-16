@@ -358,46 +358,46 @@ func (h *ResourceHandler) ListAPIResources(ctx context.Context, request mcp.Call
 		}
 
 		return response.JSON(result)
-	} else {
-		// Return full API resource information
-		var resources []APIResource
+	}
 
-		for _, list := range lists {
-			_, err := schema.ParseGroupVersion(list.GroupVersion)
-			if err != nil {
+	// Return full API resource information
+	var resources []APIResource
+
+	for _, list := range lists {
+		_, err := schema.ParseGroupVersion(list.GroupVersion)
+		if err != nil {
+			continue
+		}
+
+		for i := range list.APIResources {
+			resource := &list.APIResources[i]
+			if strings.Contains(resource.Name, "/") {
 				continue
 			}
 
-			for i := range list.APIResources {
-				resource := &list.APIResources[i]
-				if strings.Contains(resource.Name, "/") {
-					continue
-				}
-
-				resources = append(resources, APIResource{
-					Name:         resource.Name,
-					SingularName: resource.SingularName,
-					Namespaced:   resource.Namespaced,
-					Kind:         resource.Kind,
-					Verbs:        resource.Verbs,
-					ShortNames:   resource.ShortNames,
-					APIVersion:   list.GroupVersion,
-					Categories:   resource.Categories,
-				})
-			}
+			resources = append(resources, APIResource{
+				Name:         resource.Name,
+				SingularName: resource.SingularName,
+				Namespaced:   resource.Namespaced,
+				Kind:         resource.Kind,
+				Verbs:        resource.Verbs,
+				ShortNames:   resource.ShortNames,
+				APIVersion:   list.GroupVersion,
+				Categories:   resource.Categories,
+			})
 		}
-
-		sort.Slice(resources, func(i, j int) bool {
-			return resources[i].Name < resources[j].Name
-		})
-
-		result := map[string]interface{}{
-			"resources": resources,
-			"count":     len(resources),
-		}
-
-		return response.JSON(result)
 	}
+
+	sort.Slice(resources, func(i, j int) bool {
+		return resources[i].Name < resources[j].Name
+	})
+
+	result := map[string]interface{}{
+		"resources": resources,
+		"count":     len(resources),
+	}
+
+	return response.JSON(result)
 }
 
 // ListContexts implements the list_contexts MCP tool.
@@ -439,15 +439,15 @@ func (h *ResourceHandler) ListContexts(_ context.Context, request mcp.CallToolRe
 		}
 
 		return response.JSON(result)
-	} else {
-		// Return complete context information
-		result := map[string]interface{}{
-			"contexts": contexts,
-			"count":    len(contexts),
-		}
-
-		return response.JSON(result)
 	}
+
+	// Return complete context information
+	result := map[string]interface{}{
+		"contexts": contexts,
+		"count":    len(contexts),
+	}
+
+	return response.JSON(result)
 }
 
 // GetTools returns all resource-related MCP tools provided by this handler.
@@ -485,6 +485,7 @@ func (h *ResourceHandler) GetTools() []MCPTool {
 				),
 				mcp.WithBoolean("title_only",
 					mcp.Description("When true (default), returns only resource names. When false, returns metadata, apiVersion, and kind"),
+					mcp.DefaultBool(true),
 				),
 			),
 			h.ListResources,
@@ -517,6 +518,7 @@ func (h *ResourceHandler) GetTools() []MCPTool {
 				mcp.WithDescription("List available Kubernetes API resources. Returns only resource names by default (title_only=true), or complete details when title_only=false (similar to kubectl api-resources)"),
 				mcp.WithBoolean("title_only",
 					mcp.Description("When true (default), returns only resource names. When false, returns complete API resource details"),
+					mcp.DefaultBool(true),
 				),
 			),
 			h.ListAPIResources,

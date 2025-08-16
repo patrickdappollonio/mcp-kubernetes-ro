@@ -139,9 +139,8 @@ func (h *MetricsHandler) GetNodeMetrics(ctx context.Context, request mcp.CallToo
 				"name": nodeMetrics.Name,
 			}
 			return response.JSON(result)
-		} else {
-			return response.JSON(nodeMetrics)
 		}
+		return response.JSON(nodeMetrics)
 	}
 
 	// Always fetch all node metrics from the server
@@ -156,8 +155,8 @@ func (h *MetricsHandler) GetNodeMetrics(ctx context.Context, request mcp.CallToo
 	if titleOnly {
 		// Return only node names
 		var nodeNames []string
-		for _, nodeMetrics := range nodeMetricsList.Items {
-			nodeNames = append(nodeNames, nodeMetrics.Name)
+		for i := range nodeMetricsList.Items {
+			nodeNames = append(nodeNames, nodeMetricsList.Items[i].Name)
 		}
 
 		// Sort names alphabetically for consistency
@@ -191,16 +190,16 @@ func (h *MetricsHandler) GetNodeMetrics(ctx context.Context, request mcp.CallToo
 			}
 
 			return response.JSON(result)
-		} else {
-			result := map[string]interface{}{
-				"kind":       "NodeMetricsList",
-				"apiVersion": "metrics.k8s.io/v1beta1",
-				"count":      len(nodeNames),
-				"items":      nodeNames,
-			}
-
-			return response.JSON(result)
 		}
+
+		result := map[string]interface{}{
+			"kind":       "NodeMetricsList",
+			"apiVersion": "metrics.k8s.io/v1beta1",
+			"count":      len(nodeNames),
+			"items":      nodeNames,
+		}
+
+		return response.JSON(result)
 	}
 
 	// Convert to interface slice for client-side pagination
@@ -296,9 +295,8 @@ func (h *MetricsHandler) GetPodMetrics(ctx context.Context, request mcp.CallTool
 				"namespace": podMetrics.Namespace,
 			}
 			return response.JSON(result)
-		} else {
-			return response.JSON(podMetrics)
 		}
+		return response.JSON(podMetrics)
 	}
 
 	// Always fetch all pod metrics from the server
@@ -326,10 +324,10 @@ func (h *MetricsHandler) GetPodMetrics(ctx context.Context, request mcp.CallTool
 			Namespace string `json:"namespace"`
 		}
 		var podNames []PodName
-		for _, podMetrics := range podMetricsList.Items {
+		for i := range podMetricsList.Items {
 			podNames = append(podNames, PodName{
-				Name:      podMetrics.Name,
-				Namespace: podMetrics.Namespace,
+				Name:      podMetricsList.Items[i].Name,
+				Namespace: podMetricsList.Items[i].Namespace,
 			})
 		}
 
@@ -380,17 +378,17 @@ func (h *MetricsHandler) GetPodMetrics(ctx context.Context, request mcp.CallTool
 			}
 
 			return response.JSON(result)
-		} else {
-			result := map[string]interface{}{
-				"kind":       "PodMetricsList",
-				"apiVersion": "metrics.k8s.io/v1beta1",
-				"namespace":  params.Namespace,
-				"count":      len(podNames),
-				"items":      podNames,
-			}
-
-			return response.JSON(result)
 		}
+
+		result := map[string]interface{}{
+			"kind":       "PodMetricsList",
+			"apiVersion": "metrics.k8s.io/v1beta1",
+			"namespace":  params.Namespace,
+			"count":      len(podNames),
+			"items":      podNames,
+		}
+
+		return response.JSON(result)
 	}
 
 	// Convert to interface slice for client-side pagination
