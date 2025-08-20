@@ -3,7 +3,7 @@ module github.com/patrickdappollonio/mcp-kubernetes-ro
 go 1.24.3
 
 require (
-	github.com/mark3labs/mcp-go v0.37.0
+	github.com/mark3labs/mcp-go v0.38.0
 	k8s.io/api v0.33.4
 	k8s.io/apimachinery v0.33.4
 	k8s.io/client-go v0.33.4
