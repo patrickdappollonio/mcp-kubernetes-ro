@@ -109,6 +109,8 @@ func main() {
 
 	switch *transport {
 	case "stdio":
+		log.Printf("Starting MCP server with stdio transport")
+
 		if err := server.ServeStdio(s); err != nil {
 			fmt.Printf("Server error: %v\n", err)
 		}
