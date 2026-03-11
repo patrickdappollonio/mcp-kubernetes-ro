@@ -168,6 +168,18 @@ func (c *Client) WithContext(contextName string) (*Client, error) {
 	return NewClientWithContext(c.originalConfig, contextName)
 }
 
+// RESTConfig returns the underlying rest.Config for creating SPDY transports.
+// This is needed by port forwarding to establish tunneled connections to pods.
+func (c *Client) RESTConfig() *rest.Config {
+	return c.config
+}
+
+// Clientset returns the underlying kubernetes.Interface for building pod URLs.
+// This is needed by port forwarding to construct pod subresource URLs.
+func (c *Client) Clientset() kubernetes.Interface {
+	return c.clientset
+}
+
 // ForContext returns a new client configured for the specified Kubernetes context.
 // If contextName is empty, it returns the current client unchanged.
 // This is a convenience method for handlers that need to conditionally switch contexts.
