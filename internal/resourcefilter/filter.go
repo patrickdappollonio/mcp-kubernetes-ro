@@ -103,7 +103,7 @@ func (f *Filter) IsDisabled(gvr schema.GroupVersionResource) bool {
 // MatchesAPIResource checks if a discovered API resource should be filtered out.
 // The groupVersion parameter is the API group version string (e.g., "v1" for core,
 // "apps/v1" for apps group).
-func (f *Filter) MatchesAPIResource(groupVersion string, resourceName string) bool {
+func (f *Filter) MatchesAPIResource(groupVersion, resourceName string) bool {
 	gv, err := schema.ParseGroupVersion(groupVersion)
 	if err != nil {
 		return false
