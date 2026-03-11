@@ -1,104 +1,59 @@
 package handlers
 
 import (
+	"reflect"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-func TestSanitizeResourceObjectStripsManagedFieldsByDefault(t *testing.T) {
-	resource := map[string]interface{}{
-		"apiVersion": "v1",
-		"kind":       "Pod",
-		"metadata": map[string]interface{}{
-			"name":      "demo-pod",
-			"namespace": "default",
-			"managedFields": []interface{}{
-				map[string]interface{}{
-					"manager":   "kubectl-client-side-apply",
-					"operation": "Update",
-					"fieldsV1": map[string]interface{}{
-						"f:metadata": map[string]interface{}{
-							"f:labels": map[string]interface{}{
-								"f:app": map[string]interface{}{},
-							},
-						},
-						"f:spec": map[string]interface{}{
-							"f:containers": map[string]interface{}{
-								"k:{\"name\":\"demo\"}": map[string]interface{}{
-									".":       map[string]interface{}{},
-									"f:image": map[string]interface{}{},
+func TestSanitizeMetadata(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name                 string
+		metadata             map[string]interface{}
+		includeManagedFields bool
+		want                 map[string]interface{}
+	}{
+		{
+			name: "strips managed fields by default",
+			metadata: map[string]interface{}{
+				"name":      "demo-pod",
+				"namespace": "default",
+				"managedFields": []interface{}{
+					map[string]interface{}{
+						"manager": "kubectl-client-side-apply",
+						"fieldsV1": map[string]interface{}{
+							"f:metadata": map[string]interface{}{
+								"f:labels": map[string]interface{}{
+									"f:app": map[string]interface{}{},
 								},
 							},
 						},
 					},
 				},
 			},
-		},
-		"spec": map[string]interface{}{
-			"containers": []interface{}{
-				map[string]interface{}{"name": "demo", "image": "nginx"},
+			includeManagedFields: false,
+			want: map[string]interface{}{
+				"name":      "demo-pod",
+				"namespace": "default",
 			},
 		},
-	}
-
-	sanitized := sanitizeResourceObject(resource, false)
-	metadata := sanitized["metadata"].(map[string]interface{})
-
-	if _, ok := metadata["managedFields"]; ok {
-		t.Fatal("expected managedFields to be removed")
-	}
-
-	if metadata["name"] != "demo-pod" {
-		t.Fatalf("expected metadata.name to be preserved, got %v", metadata["name"])
-	}
-
-	if _, ok := resource["metadata"].(map[string]interface{})["managedFields"]; !ok {
-		t.Fatal("expected original resource to remain unchanged")
-	}
-}
-
-func TestSanitizeResourceObjectPreservesManagedFieldsWhenRequested(t *testing.T) {
-	resource := map[string]interface{}{
-		"metadata": map[string]interface{}{
-			"name": "demo-pod",
-			"managedFields": []interface{}{
-				map[string]interface{}{
-					"fieldsV1": map[string]interface{}{
-						"f:metadata": map[string]interface{}{},
+		{
+			name: "preserves managed fields when requested",
+			metadata: map[string]interface{}{
+				"name": "demo-pod",
+				"managedFields": []interface{}{
+					map[string]interface{}{
+						"fieldsV1": map[string]interface{}{
+							"f:spec": map[string]interface{}{},
+						},
 					},
 				},
 			},
-		},
-	}
-
-	sanitized := sanitizeResourceObject(resource, true)
-	metadata := sanitized["metadata"].(map[string]interface{})
-
-	if _, ok := metadata["managedFields"]; !ok {
-		t.Fatal("expected managedFields to be preserved")
-	}
-}
-
-func TestSanitizeResourceObjectHandlesMissingMetadata(t *testing.T) {
-	resource := map[string]interface{}{
-		"apiVersion": "v1",
-		"kind":       "Namespace",
-	}
-
-	sanitized := sanitizeResourceObject(resource, false)
-
-	if sanitized["kind"] != "Namespace" {
-		t.Fatalf("expected kind to be preserved, got %v", sanitized["kind"])
-	}
-}
-
-func TestExtractResourceSummaryStripsManagedFieldsByDefault(t *testing.T) {
-	resource := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"apiVersion": "v1",
-			"kind":       "Pod",
-			"metadata": map[string]interface{}{
+			includeManagedFields: true,
+			want: map[string]interface{}{
 				"name": "demo-pod",
 				"managedFields": []interface{}{
 					map[string]interface{}{
@@ -109,47 +64,147 @@ func TestExtractResourceSummaryStripsManagedFieldsByDefault(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "handles metadata without managed fields",
+			metadata: map[string]interface{}{
+				"name":              "demo-pod",
+				"creationTimestamp": "2026-03-11T12:00:00Z",
+			},
+			includeManagedFields: false,
+			want: map[string]interface{}{
+				"name":              "demo-pod",
+				"creationTimestamp": "2026-03-11T12:00:00Z",
+			},
+		},
 	}
 
-	summary := extractResourceSummary(resource, false)
-	metadata := summary["metadata"].(map[string]interface{})
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-	if _, ok := metadata["managedFields"]; ok {
-		t.Fatal("expected managedFields to be removed from summary metadata")
-	}
-
-	if summary["apiVersion"] != "v1" {
-		t.Fatalf("expected apiVersion to be preserved, got %v", summary["apiVersion"])
+			got := sanitizeMetadata(tt.metadata, tt.includeManagedFields)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("sanitizeMetadata() mismatch\nwant: %#v\ngot:  %#v", tt.want, got)
+			}
+		})
 	}
 }
 
-func TestExtractResourceSummaryPreservesManagedFieldsWhenRequested(t *testing.T) {
-	resource := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"apiVersion": "v1",
-			"kind":       "Pod",
-			"metadata": map[string]interface{}{
-				"name": "demo-pod",
-				"managedFields": []interface{}{
-					map[string]interface{}{
-						"fieldsV1": map[string]interface{}{
-							"f:spec": map[string]interface{}{},
+func TestSanitizeResourceObject(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name                 string
+		resource             map[string]interface{}
+		includeManagedFields bool
+		want                 map[string]interface{}
+	}{
+		{
+			name: "strips managed fields from metadata by default",
+			resource: map[string]interface{}{
+				"apiVersion": "v1",
+				"kind":       "Pod",
+				"metadata": map[string]interface{}{
+					"name": "demo-pod",
+					"managedFields": []interface{}{
+						map[string]interface{}{
+							"fieldsV1": map[string]interface{}{
+								"f:spec": map[string]interface{}{
+									"f:containers": map[string]interface{}{},
+								},
+							},
+						},
+					},
+				},
+				"spec": map[string]interface{}{
+					"restartPolicy": "Always",
+				},
+			},
+			includeManagedFields: false,
+			want: map[string]interface{}{
+				"apiVersion": "v1",
+				"kind":       "Pod",
+				"metadata": map[string]interface{}{
+					"name": "demo-pod",
+				},
+				"spec": map[string]interface{}{
+					"restartPolicy": "Always",
+				},
+			},
+		},
+		{
+			name: "preserves managed fields when requested",
+			resource: map[string]interface{}{
+				"apiVersion": "v1",
+				"metadata": map[string]interface{}{
+					"name": "demo-pod",
+					"managedFields": []interface{}{
+						map[string]interface{}{
+							"fieldsV1": map[string]interface{}{
+								"f:metadata": map[string]interface{}{},
+							},
+						},
+					},
+				},
+			},
+			includeManagedFields: true,
+			want: map[string]interface{}{
+				"apiVersion": "v1",
+				"metadata": map[string]interface{}{
+					"name": "demo-pod",
+					"managedFields": []interface{}{
+						map[string]interface{}{
+							"fieldsV1": map[string]interface{}{
+								"f:metadata": map[string]interface{}{},
+							},
 						},
 					},
 				},
 			},
 		},
+		{
+			name: "handles resource without metadata",
+			resource: map[string]interface{}{
+				"apiVersion": "v1",
+				"kind":       "Namespace",
+			},
+			includeManagedFields: false,
+			want: map[string]interface{}{
+				"apiVersion": "v1",
+				"kind":       "Namespace",
+			},
+		},
+		{
+			name: "preserves non-map metadata as-is",
+			resource: map[string]interface{}{
+				"apiVersion": "v1",
+				"metadata":   "unexpected",
+			},
+			includeManagedFields: false,
+			want: map[string]interface{}{
+				"apiVersion": "v1",
+				"metadata":   "unexpected",
+			},
+		},
 	}
 
-	summary := extractResourceSummary(resource, true)
-	metadata := summary["metadata"].(map[string]interface{})
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-	if _, ok := metadata["managedFields"]; !ok {
-		t.Fatal("expected managedFields to be preserved in summary metadata")
+			got := sanitizeResourceObject(tt.resource, tt.includeManagedFields)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("sanitizeResourceObject() mismatch\nwant: %#v\ngot:  %#v", tt.want, got)
+			}
+		})
 	}
 }
 
 func TestExtractResourceTitleIsUnchanged(t *testing.T) {
+	t.Parallel()
+
 	resource := &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"metadata": map[string]interface{}{
@@ -162,12 +217,9 @@ func TestExtractResourceTitleIsUnchanged(t *testing.T) {
 	}
 
 	title := extractResourceTitle(resource)
+	want := map[string]interface{}{"name": "demo-pod"}
 
-	if len(title) != 1 {
-		t.Fatalf("expected title-only response to contain only one field, got %d", len(title))
-	}
-
-	if title["name"] != "demo-pod" {
-		t.Fatalf("expected title name to be preserved, got %v", title["name"])
+	if !reflect.DeepEqual(title, want) {
+		t.Fatalf("extractResourceTitle() mismatch\nwant: %#v\ngot:  %#v", want, title)
 	}
 }
