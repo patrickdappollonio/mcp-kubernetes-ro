@@ -80,7 +80,6 @@ linters:
         - appendAssign
         - unnamedResult
         - badRegexp
-        - hugeParam
     gocyclo:
       min-complexity: 60
     gosec:
@@ -110,6 +109,11 @@ linters:
         - response.JSON(
   exclusions:
     generated: lax
+    rules:
+      - linters:
+          - gocritic
+        text: "hugeParam"
+        source: "mcp\\.CallToolRequest"
     presets:
       - comments
       - common-false-positives
