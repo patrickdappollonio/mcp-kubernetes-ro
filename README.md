@@ -647,6 +647,9 @@ Enable it with the `--enable-port-forwarding` flag or by setting the `MCP_KUBERN
 > [!WARNING]
 > Port forwarding can target **any pod** in the cluster that your kubeconfig credentials have access to, including infrastructure pods. If the Kubernetes API server itself is running as a pod (e.g., in self-hosted or certain managed setups), an AI agent could theoretically forward to it. While port forwarding alone **does not grant additional privileges** — you still need valid credentials and RBAC permissions to authenticate against the API server — exposing the API server on a local port could lead to unintended interactions if other local tools or scripts discover it. Always review your RBAC policies and consider using `--disabled-resources` alongside port forwarding to limit what the AI agent can discover and target.
 
+> [!WARNING]
+> When running in **SSE mode** (`--transport=sse`) on a remote server, forwarded ports bind to the **server's local interface**, not your workstation. This means `localhost:<local_port>` refers to the machine where `mcp-kubernetes-ro` is running. To access forwarded services from your workstation, you must expose those ports — for example, via SSH tunneling (`ssh -L <local_port>:localhost:<local_port> user@remote-host`) or other network configuration. In stdio mode this is not an issue, as the server runs locally alongside your editor.
+
 When enabled, three additional tools become available:
 
 #### Start Port Forward
