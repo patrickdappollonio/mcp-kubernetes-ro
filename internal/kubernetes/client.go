@@ -176,6 +176,8 @@ func (c *Client) RESTConfig() *rest.Config {
 
 // Clientset returns the underlying kubernetes.Interface for building pod URLs.
 // This is needed by port forwarding to construct pod subresource URLs.
+//
+//nolint:ireturn // returning interface is intentional — callers need kubernetes.Interface for API access
 func (c *Client) Clientset() kubernetes.Interface {
 	return c.clientset
 }

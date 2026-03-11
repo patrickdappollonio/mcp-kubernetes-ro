@@ -28,7 +28,7 @@ func NewPortForwardHandler(client *kubernetes.Client, manager *portforward.Manag
 
 // StartPortForward implements the start_port_forward MCP tool.
 // It establishes a port-forwarding session to a pod with one or more port mappings.
-func (h *PortForwardHandler) StartPortForward(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func (h *PortForwardHandler) StartPortForward(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	var params struct {
 		// Namespace specifies the pod's namespace.
 		Namespace string `json:"namespace"`
@@ -75,6 +75,7 @@ func (h *PortForwardHandler) StartPortForward(_ context.Context, request mcp.Cal
 	}
 
 	entry, err := h.manager.Start(
+		ctx,
 		client.RESTConfig(),
 		client.Clientset(),
 		params.Namespace,

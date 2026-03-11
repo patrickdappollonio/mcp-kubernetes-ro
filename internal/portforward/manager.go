@@ -4,6 +4,8 @@
 package portforward
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -70,6 +72,7 @@ func NewManager() *Manager {
 // For any PortMapping with LocalPort == 0, a free port is automatically assigned.
 // The returned ForwardEntry contains the resolved local ports.
 func (m *Manager) Start(
+	ctx context.Context,
 	config *rest.Config,
 	clientset kubernetes.Interface,
 	namespace, pod string,
@@ -99,7 +102,7 @@ func (m *Manager) Start(
 	for i, p := range ports {
 		localPort := p.LocalPort
 		if localPort == 0 {
-			assigned, err := findFreePort()
+			assigned, err := findFreePort(ctx)
 			if err != nil {
 				return nil, fmt.Errorf("failed to find free port for pod port %d: %w", p.PodPort, err)
 			}
@@ -137,7 +140,7 @@ func (m *Manager) Start(
 		return nil, fmt.Errorf("port forwarding failed to start: %w", err)
 	case <-time.After(10 * time.Second):
 		close(stopChan)
-		return nil, fmt.Errorf("port forwarding timed out waiting for ready signal")
+		return nil, errors.New("port forwarding timed out waiting for ready signal")
 	}
 
 	// Retrieve the actual forwarded ports (handles :0 resolution by the forwarder)
@@ -221,8 +224,9 @@ func (m *Manager) StopAll() {
 }
 
 // findFreePort binds to :0 to discover a free port, then closes the listener.
-func findFreePort() (int, error) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+func findFreePort(ctx context.Context) (int, error) {
+	lc := net.ListenConfig{}
+	listener, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
 	if err != nil {
 		return 0, fmt.Errorf("failed to bind to free port: %w", err)
 	}
