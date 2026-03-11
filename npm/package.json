@@ -1,0 +1,31 @@
+{
+  "name": "@patrickdappollonio/mcp-kubernetes-ro",
+  "version": "0.0.0-dev",
+  "description": "A read-only Kubernetes MCP server: list resources, get resource details, retrieve pod logs, discover API resources, and perform base64 encoding/decoding operations - all while maintaining security through read-only access.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "mcp-kubernetes-ro": "bin/mcp-kubernetes-ro.js"
+  },
+  "files": [
+    "bin",
+    "vendor",
+    "README.md",
+    "LICENSE",
+    "kubernetes-ro.png"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/patrickdappollonio/mcp-kubernetes-ro"
+  },
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "kubernetes",
+    "model-context-protocol",
+    "read-only"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}
