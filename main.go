@@ -8,29 +8,68 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/mark3labs/mcp-go/server"
-	"github.com/patrickdappollonio/mcp-kubernetes-ro/internal/env"
 	"github.com/patrickdappollonio/mcp-kubernetes-ro/internal/handlers"
 	"github.com/patrickdappollonio/mcp-kubernetes-ro/internal/kubernetes"
+	"github.com/patrickdappollonio/mcp-kubernetes-ro/internal/resourcefilter"
 	"github.com/patrickdappollonio/mcp-kubernetes-ro/internal/toolfilter"
 )
 
+// stringSlice implements flag.Value for a repeatable, comma-separated string flag.
+// Each use of the flag appends to the list, and values within a single use
+// can be comma-separated. For example:
+//
+//	-flag=a,b -flag=c → ["a", "b", "c"]
+type stringSlice []string
+
+func (s *stringSlice) String() string {
+	return strings.Join(*s, ",")
+}
+
+func (s *stringSlice) Set(value string) error {
+	for _, v := range strings.FieldsFunc(value, func(r rune) bool {
+		return r == ',' || r == ' ' || r == '\t' || r == '\n' || r == '\r'
+	}) {
+		*s = append(*s, v)
+	}
+	return nil
+}
+
 var (
-	kubeconfig    = flag.String("kubeconfig", "", "Path to kubeconfig file")
-	namespace     = flag.String("namespace", "", "Default namespace")
-	transport     = flag.String("transport", "stdio", "Transport type: stdio or sse")
-	port          = flag.Int("port", 8080, "Port for SSE server (only used with -transport=sse)")
-	disabledTools = flag.String("disabled-tools", "", "Comma-separated list of tool names to disable")
-	version       = "dev"
+	kubeconfig        = flag.String("kubeconfig", "", "Path to kubeconfig file")
+	namespace         = flag.String("namespace", "", "Default namespace")
+	transport         = flag.String("transport", "stdio", "Transport type: stdio or sse")
+	port              = flag.Int("port", 8080, "Port for SSE server (only used with -transport=sse)")
+	disabledTools     stringSlice
+	disabledResources stringSlice
+	version           = "dev"
 )
+
+func init() {
+	flag.Var(&disabledTools, "disabled-tools", "Tool names to disable (repeatable, comma-separated)")
+	flag.Var(&disabledResources, "disabled-resources", "Resources to disable (repeatable, comma-separated, e.g. secrets or core/v1/secrets)")
+}
+
+// resolveEnvSlice appends values from environment variables to a stringSlice
+// if the env var is set. This allows both flag and env var sources to contribute.
+func resolveEnvSlice(s *stringSlice, envVars ...string) {
+	for _, key := range envVars {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			_ = s.Set(value)
+			return // use first set env var only
+		}
+	}
+}
 
 func main() {
 	flag.Parse()
 
-	// Handle environment variable for disabled tools
-	resolvedDisabledTools := env.FirstDefault(*disabledTools, "MCP_KUBERNETES_RO_DISABLED_TOOLS", "DISABLED_TOOLS")
+	// Merge environment variables into flag values
+	resolveEnvSlice(&disabledTools, "MCP_KUBERNETES_RO_DISABLED_TOOLS", "DISABLED_TOOLS")
+	resolveEnvSlice(&disabledResources, "MCP_KUBERNETES_RO_DISABLED_RESOURCES")
 
 	kubeConfig := &kubernetes.Config{
 		Kubeconfig: *kubeconfig,
@@ -53,8 +92,20 @@ func main() {
 	cancel() // Clean up the context
 	fmt.Fprintln(os.Stderr, "Connected to Kubernetes cluster, starting MCP server...")
 
+	// Create resource filter for disabled resources, using the client to
+	// resolve user-friendly names (singular, kind, short names) to canonical GVRs
+	resFilter, err := resourcefilter.NewFilter(strings.Join(disabledResources, ","), client)
+	if err != nil {
+		log.Fatalf("Failed to parse disabled resources: %v", err)
+	}
+	if resFilter.HasDisabledResources() {
+		for _, res := range resFilter.GetDisabledResources() {
+			fmt.Fprintf(os.Stderr, "Disabling access to resource: %q\n", res)
+		}
+	}
+
 	// Define tools and handlers
-	resourceHandler := handlers.NewResourceHandler(client)
+	resourceHandler := handlers.NewResourceHandler(client, resFilter)
 	logHandler := handlers.NewLogHandler(client)
 	metricsHandler := handlers.NewMetricsHandler(client)
 	utilsHandler := handlers.NewUtilsHandler()
@@ -91,7 +142,7 @@ func main() {
 	}
 
 	// Create tool filter
-	filter := toolfilter.NewFilter(resolvedDisabledTools)
+	filter := toolfilter.NewFilterFromList(disabledTools)
 
 	// Register tools from handlers
 	for _, handler := range allHandlers {

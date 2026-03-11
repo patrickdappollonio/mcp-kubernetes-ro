@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/patrickdappollonio/mcp-kubernetes-ro/internal/kubernetes"
+	"github.com/patrickdappollonio/mcp-kubernetes-ro/internal/resourcefilter"
 	"github.com/patrickdappollonio/mcp-kubernetes-ro/internal/response"
 )
 
@@ -20,13 +21,16 @@ import (
 // for filtering, pagination, and dynamic resource type resolution. The handler
 // supports both namespaced and cluster-scoped resources.
 type ResourceHandler struct {
-	client *kubernetes.Client
+	client         *kubernetes.Client
+	resourceFilter *resourcefilter.Filter
 }
 
-// NewResourceHandler creates a new ResourceHandler with the provided Kubernetes client.
-func NewResourceHandler(client *kubernetes.Client) *ResourceHandler {
+// NewResourceHandler creates a new ResourceHandler with the provided Kubernetes client
+// and an optional resource filter for blocking access to specific resource types.
+func NewResourceHandler(client *kubernetes.Client, filter *resourcefilter.Filter) *ResourceHandler {
 	return &ResourceHandler{
-		client: client,
+		client:         client,
+		resourceFilter: filter,
 	}
 }
 
@@ -95,6 +99,11 @@ func (h *ResourceHandler) ListResources(ctx context.Context, request mcp.CallToo
 	gvr, err := client.ResolveResourceType(params.ResourceType, params.APIVersion)
 	if err != nil {
 		return response.Errorf("failed to resolve resource type: %v", err)
+	}
+
+	if h.resourceFilter != nil && h.resourceFilter.IsDisabled(gvr) {
+		return response.Errorf("access to resource %q (%s) is disabled by configuration and cannot be queried",
+			params.ResourceType, resourcefilter.FormatGVR(gvr))
 	}
 
 	listOptions := metav1.ListOptions{
@@ -218,6 +227,11 @@ func (h *ResourceHandler) GetResource(ctx context.Context, request mcp.CallToolR
 	gvr, err := client.ResolveResourceType(params.ResourceType, params.APIVersion)
 	if err != nil {
 		return response.Errorf("failed to resolve resource type: %v", err)
+	}
+
+	if h.resourceFilter != nil && h.resourceFilter.IsDisabled(gvr) {
+		return response.Errorf("access to resource %q (%s) is disabled by configuration and cannot be queried",
+			params.ResourceType, resourcefilter.FormatGVR(gvr))
 	}
 
 	resource, err := client.GetResource(ctx, gvr, params.Namespace, params.Name)
@@ -394,6 +408,9 @@ func (h *ResourceHandler) ListAPIResources(ctx context.Context, request mcp.Call
 				if strings.Contains(resource.Name, "/") {
 					continue
 				}
+				if h.resourceFilter != nil && h.resourceFilter.MatchesAPIResource(list.GroupVersion, resource.Name) {
+					continue
+				}
 				resourceNames = append(resourceNames, resource.Name)
 			}
 		}
@@ -420,6 +437,9 @@ func (h *ResourceHandler) ListAPIResources(ctx context.Context, request mcp.Call
 		for i := range list.APIResources {
 			resource := &list.APIResources[i]
 			if strings.Contains(resource.Name, "/") {
+				continue
+			}
+			if h.resourceFilter != nil && h.resourceFilter.MatchesAPIResource(list.GroupVersion, resource.Name) {
 				continue
 			}
 
