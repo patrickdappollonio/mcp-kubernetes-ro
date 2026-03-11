@@ -21,6 +21,7 @@ The server leverages your local `kubectl` configuration (even when `kubectl` is 
 - **Advanced Filtering**: Support for label selectors, field selectors, and pagination
 - **Per-Command Context**: Specify different Kubernetes contexts for individual commands
 - **Environment Variable Support**: Automatic detection of KUBECONFIG environment variable
+- **Port Forwarding (opt-in)**: Establish tunneled connections to pod ports for debugging, with support for multiple ports per session
 - **Startup Connectivity Check**: Automatic validation of cluster connectivity and basic permissions on startup
 
 ## Installation
@@ -147,7 +148,7 @@ Do note that you'll need to mount your kubeconfig file into the container, and e
 
 ## Available MCP Tools
 
-There are **10 tools** available:
+There are **10 tools** available by default, plus **3 additional tools** when port forwarding is enabled:
 
 - **`list_resources`**: List any Kubernetes resources by type with optional filtering, sorted newest first. `metadata.managedFields` is omitted by default unless `include_managed_fields=true`
 - **`get_resource`**: Get specific resource details. `metadata.managedFields` is omitted by default unless `include_managed_fields=true`
@@ -159,6 +160,9 @@ There are **10 tools** available:
 - **`get_pod_metrics`**: Get pod metrics (CPU and memory usage)
 - **`encode_base64`**: Encode text data to base64 format
 - **`decode_base64`**: Decode base64 data to text format
+- **`start_port_forward`** *(opt-in)*: Start port forwarding to a pod with one or more port mappings
+- **`stop_port_forward`** *(opt-in)*: Stop an active port-forwarding session by ID
+- **`list_port_forwards`** *(opt-in)*: List all active port-forwarding sessions
 
 ## Tool Management
 
@@ -192,6 +196,9 @@ This is useful for:
 - `get_pod_metrics`
 - `encode_base64`
 - `decode_base64`
+- `start_port_forward` *(only when port forwarding is enabled)*
+- `stop_port_forward` *(only when port forwarding is enabled)*
+- `list_port_forwards` *(only when port forwarding is enabled)*
 
 When a tool is disabled, it will not be registered with the MCP server and will not appear in the available tools list. A message will be logged to stderr indicating which tools have been skipped.
 
@@ -258,6 +265,11 @@ The following command-line flags are available to configure the MCP server:
 - `--disabled-tools=NAMES`: Comma-separated list of tool names to disable (optional)
 - `MCP_KUBERNETES_RO_DISABLED_TOOLS`: App-specific environment variable for disabled tools (command line flag takes priority)
 - `DISABLED_TOOLS`: Generic environment variable for disabled tools (lower priority than `MCP_KUBERNETES_RO_DISABLED_TOOLS`)
+
+### Port Forwarding
+- `--enable-port-forwarding`: Enable port forwarding tools (disabled by default)
+- `MCP_KUBERNETES_RO_ENABLE_PORT_FORWARDING`: App-specific environment variable (set to `true`, `1`, or `yes`)
+- `ENABLE_PORT_FORWARDING`: Generic environment variable (set to `true`, `1`, or `yes`)
 
 ### Context Configuration
 
@@ -602,6 +614,147 @@ Decodes base64 data to text format.
 }
 ```
 
+### Port Forwarding (opt-in)
+
+Port forwarding is **disabled by default** because it goes beyond read-only operations. While it does not modify any cluster state (no resources are created, updated, or deleted), it establishes active network tunnels from your local machine to pod ports. This means traffic can flow through those tunnels, which could interact with the running application — for example, hitting an HTTP endpoint, connecting to a database, or triggering side effects in the target service. For this reason, port forwarding must be explicitly enabled.
+
+Enable it with the `--enable-port-forwarding` flag or by setting the `MCP_KUBERNETES_RO_ENABLE_PORT_FORWARDING` environment variable to `true`.
+
+When enabled, three additional tools become available:
+
+#### Start Port Forward
+
+Establishes a port-forwarding session to a Kubernetes pod. Supports forwarding multiple ports in a single session. Each port mapping forwards a local port to a port on the pod. Set `local_port` to `0` (or omit it) to let the system auto-assign a free local port.
+
+**Arguments:**
+- `namespace` (required): Pod namespace
+- `pod` (required): Pod name
+- `ports` (required): Array of port mappings, each with:
+  - `pod_port` (required): Port on the pod to forward to (1-65535)
+  - `local_port` (optional): Local port to listen on (0 or omit for auto-assign)
+- `context` (optional): Kubernetes context to use (defaults to current context from kubeconfig)
+
+**Example (single port, auto-assign):**
+```json
+{
+  "namespace": "default",
+  "pod": "my-app-pod-abc123",
+  "ports": [
+    { "pod_port": 8080 }
+  ]
+}
+```
+
+**Example (multiple ports, explicit local ports):**
+```json
+{
+  "namespace": "default",
+  "pod": "my-app-pod-abc123",
+  "ports": [
+    { "pod_port": 8080, "local_port": 18080 },
+    { "pod_port": 5432, "local_port": 15432 }
+  ]
+}
+```
+
+**Example Response:**
+```json
+{
+  "id": "pf-1",
+  "namespace": "default",
+  "pod": "my-app-pod-abc123",
+  "ports": [
+    { "pod_port": 8080, "local_port": 18080 },
+    { "pod_port": 5432, "local_port": 15432 }
+  ],
+  "started_at": "2025-01-15T10:30:00Z"
+}
+```
+
+#### Stop Port Forward
+
+Terminates an active port-forwarding session by its ID.
+
+**Arguments:**
+- `id` (required): Port forward session ID (e.g., `"pf-1"`)
+
+**Example:**
+```json
+{
+  "id": "pf-1"
+}
+```
+
+**Example Response:**
+```json
+{
+  "id": "pf-1",
+  "stopped": true
+}
+```
+
+#### List Port Forwards
+
+Lists all active port-forwarding sessions with their port mappings and metadata. Takes no arguments.
+
+**Example:**
+```json
+{}
+```
+
+**Example Response:**
+```json
+{
+  "count": 2,
+  "port_forwards": [
+    {
+      "id": "pf-1",
+      "namespace": "default",
+      "pod": "my-app-pod-abc123",
+      "ports": [
+        { "pod_port": 8080, "local_port": 18080 }
+      ],
+      "started_at": "2025-01-15T10:30:00Z"
+    },
+    {
+      "id": "pf-2",
+      "namespace": "monitoring",
+      "pod": "grafana-xyz789",
+      "ports": [
+        { "pod_port": 3000, "local_port": 13000 }
+      ],
+      "started_at": "2025-01-15T10:35:00Z"
+    }
+  ]
+}
+```
+
+#### Port Forwarding Behavior
+
+- **Automatic cleanup**: If the target pod is deleted or the connection drops, the port-forward session is automatically removed. Subsequent calls to `list_port_forwards` will no longer show the terminated session.
+- **Graceful shutdown**: When the MCP server is stopped (via `SIGINT` or `SIGTERM`), all active port-forward sessions are terminated.
+- **Session IDs**: Each session gets a unique, incrementing ID (e.g., `pf-1`, `pf-2`). Use this ID with `stop_port_forward` to terminate a specific session.
+- **Multiple sessions**: You can have multiple port-forward sessions active simultaneously, each targeting different pods or ports.
+
+#### Editor Configuration with Port Forwarding
+
+```json5
+{
+  "mcpServers": {
+    "kubernetes-ro": {
+      "command": "mcp-kubernetes-ro",
+      "args": [
+        "--enable-port-forwarding"
+      ],
+      "env": {
+        // Or use the environment variable instead of the flag:
+        // "MCP_KUBERNETES_RO_ENABLE_PORT_FORWARDING": "true"
+      }
+    }
+  }
+}
+```
+
 ## Examples
 
 ### Basic Usage Examples
@@ -622,6 +775,13 @@ mcp-kubernetes-ro --namespace kube-system
 
 # Start in SSE mode
 mcp-kubernetes-ro --transport=sse --port=3000
+
+# Start with port forwarding enabled
+mcp-kubernetes-ro --enable-port-forwarding
+
+# Start with port forwarding via environment variable
+export MCP_KUBERNETES_RO_ENABLE_PORT_FORWARDING=true
+mcp-kubernetes-ro
 ```
 
 ### Advanced Configuration Examples
