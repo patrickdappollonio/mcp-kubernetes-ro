@@ -80,6 +80,7 @@ linters:
         - appendAssign
         - unnamedResult
         - badRegexp
+        - hugeParam
     gocyclo:
       min-complexity: 60
     gosec:
