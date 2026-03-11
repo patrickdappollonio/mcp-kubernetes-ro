@@ -130,6 +130,10 @@ func main() {
 	if portForwardingEnabled {
 		pfManager = portforward.NewManager()
 		fmt.Fprintln(os.Stderr, "Port forwarding tools enabled")
+
+		if *transport == "sse" {
+			fmt.Fprintln(os.Stderr, "WARNING: Port forwarding with SSE mode — forwarded ports bind to this server's local interface, not the client's machine. Remote clients will need to expose or tunnel those ports to access forwarded services.")
+		}
 	}
 
 	// Build server instructions
