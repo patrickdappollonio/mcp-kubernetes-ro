@@ -127,6 +127,18 @@ func resolveKubeconfigPath(kubeconfig string) string {
 	return kubeconfig
 }
 
+// newLoadingRules creates ClientConfigLoadingRules that handle both single and
+// multi-path kubeconfig values (colon-separated, as supported by kubectl).
+func newLoadingRules(kubeconfig string) *clientcmd.ClientConfigLoadingRules {
+	rules := clientcmd.NewDefaultClientConfigLoadingRules()
+	if strings.Contains(kubeconfig, string(filepath.ListSeparator)) {
+		rules.Precedence = filepath.SplitList(kubeconfig)
+	} else {
+		rules.ExplicitPath = kubeconfig
+	}
+	return rules
+}
+
 func buildConfig(kubeconfig, contextName string) (*rest.Config, error) {
 	resolvedKubeconfig := resolveKubeconfigPath(kubeconfig)
 
@@ -135,8 +147,7 @@ func buildConfig(kubeconfig, contextName string) (*rest.Config, error) {
 		return rest.InClusterConfig() //nolint:wrapcheck // kubernetes client-go errors are self-descriptive
 	}
 
-	rules := clientcmd.NewDefaultClientConfigLoadingRules()
-	rules.ExplicitPath = resolvedKubeconfig
+	rules := newLoadingRules(resolvedKubeconfig)
 
 	overrides := &clientcmd.ConfigOverrides{}
 	if contextName != "" {
@@ -196,7 +207,7 @@ func (c *Client) ListContexts() ([]KubeContext, error) {
 		return nil, errors.New("no kubeconfig available: provide a kubeconfig file path for the MCP server")
 	}
 
-	configLoadingRules := &clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeconfig}
+	configLoadingRules := newLoadingRules(kubeconfig)
 	configOverrides := &clientcmd.ConfigOverrides{}
 
 	clientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
