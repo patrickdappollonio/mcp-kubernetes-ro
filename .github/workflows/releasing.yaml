@@ -5,9 +5,12 @@ on:
       - "*"
 
 jobs:
-  goreleaser:
+  release:
     name: Release Application
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.release_version.outputs.value }}
+      npm_tag: ${{ steps.npm_dist_tag.outputs.value }}
     permissions:
       contents: write
       packages: write
@@ -16,20 +19,48 @@ jobs:
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
+
+      - name: Determine release version
+        id: release_version
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          version="${tag#v}"
+          if [[ -z "${version}" ]]; then
+            echo "Failed to extract version from tag ${tag}"
+            exit 1
+          fi
+          echo "value=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Determine npm dist tag
+        id: npm_dist_tag
+        env:
+          VERSION: ${{ steps.release_version.outputs.value }}
+        run: |
+          version="${VERSION}"
+          if [[ "${version}" == *-* ]]; then
+            echo "value=next" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+
       - name: Test application
         run: go test ./...
+
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           registry: "ghcr.io"
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
+
       - name: Release application to Github
         uses: goreleaser/goreleaser-action@v6
         with:
@@ -38,23 +69,65 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Publish to npm
-        uses: evg4b/goreleaser-npm-publisher-action@v1
+
+      - name: Set up Node.js for npm packaging
+        uses: actions/setup-node@v4
         with:
-          prefix: '@patrickdappollonio'
-          token: ${{ secrets.NPM_AUTH_TOKEN }}
-          description: "A read-only Kubernetes MCP server: list resources, get resource details, retrieve pod logs, discover API resources, and perform base64 encoding/decoding operations - all while maintaining security through read-only access."
-          files: |-
-            LICENSE
-            README.md
-            kubernetes-ro.png
-          keywords: |-
-            mcp
-            mcp-server-debug
-            debug-http-headers
-            debug-dns-requests
-            debug-tls-certificates
-            http
-            https
-            cli
-            devtool
+          node-version: 22
+
+      - name: Build npm package
+        env:
+          RELEASE_VERSION: ${{ steps.release_version.outputs.value }}
+        run: node npm/scripts/build_npm_package.mjs
+
+      - name: Upload npm package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-package
+          path: dist/npm/mcp-kubernetes-ro-npm-*.tgz
+          retention-days: 1
+          if-no-files-found: error
+
+  publish-npm:
+    name: Publish npm package
+    needs: release
+    if: ${{ needs.release.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          scope: "@patrickdappollonio"
+
+      - name: Update npm
+        run: npm install -g npm@latest
+
+      - name: Download npm package artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: npm-package
+          path: dist/npm
+
+      - name: Publish to npm
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
+          NPM_TAG: ${{ needs.release.outputs.npm_tag }}
+        run: |
+          set -euo pipefail
+          tarball="dist/npm/mcp-kubernetes-ro-npm-${VERSION}.tgz"
+          if [[ ! -f "${tarball}" ]]; then
+            echo "npm tarball ${tarball} not found"
+            exit 1
+          fi
+
+          publish_cmd=(npm publish "${tarball}" --provenance --access public)
+          if [[ -n "${NPM_TAG}" ]]; then
+            publish_cmd+=(--tag "${NPM_TAG}")
+          fi
+
+          echo "+ ${publish_cmd[*]}"
+          "${publish_cmd[@]}"
