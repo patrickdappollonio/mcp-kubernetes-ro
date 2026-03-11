@@ -644,6 +644,9 @@ Port forwarding is **disabled by default** because it goes beyond read-only oper
 
 Enable it with the `--enable-port-forwarding` flag or by setting the `MCP_KUBERNETES_RO_ENABLE_PORT_FORWARDING` environment variable to `true`.
 
+> [!WARNING]
+> Port forwarding can target **any pod** in the cluster that your kubeconfig credentials have access to, including infrastructure pods. If the Kubernetes API server itself is running as a pod (e.g., in self-hosted or certain managed setups), an AI agent could theoretically forward to it. While port forwarding alone **does not grant additional privileges** — you still need valid credentials and RBAC permissions to authenticate against the API server — exposing the API server on a local port could lead to unintended interactions if other local tools or scripts discover it. Always review your RBAC policies and consider using `--disabled-resources` alongside port forwarding to limit what the AI agent can discover and target.
+
 When enabled, three additional tools become available:
 
 #### Start Port Forward
