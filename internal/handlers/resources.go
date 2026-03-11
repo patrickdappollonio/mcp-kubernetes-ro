@@ -256,7 +256,7 @@ func extractResourceSummary(resource *unstructured.Unstructured, includeManagedF
 		summary["kind"] = kind
 	}
 
-	if metadata := resource.Object["metadata"]; metadata != nil {
+	if metadata, ok := resource.Object["metadata"].(map[string]interface{}); ok {
 		summary["metadata"] = sanitizeMetadata(metadata, includeManagedFields)
 	}
 
@@ -271,7 +271,12 @@ func sanitizeResourceObject(resource map[string]interface{}, includeManagedField
 	sanitized := make(map[string]interface{}, len(resource))
 	for key, value := range resource {
 		if key == "metadata" {
-			sanitized[key] = sanitizeMetadata(value, false)
+			if metadata, ok := value.(map[string]interface{}); ok {
+				sanitized[key] = sanitizeMetadata(metadata, false)
+				continue
+			}
+
+			sanitized[key] = value
 			continue
 		}
 
@@ -281,14 +286,13 @@ func sanitizeResourceObject(resource map[string]interface{}, includeManagedField
 	return sanitized
 }
 
-func sanitizeMetadata(metadata interface{}, includeManagedFields bool) interface{} {
-	metadataMap, ok := metadata.(map[string]interface{})
-	if !ok || includeManagedFields {
+func sanitizeMetadata(metadata map[string]interface{}, includeManagedFields bool) map[string]interface{} {
+	if includeManagedFields {
 		return metadata
 	}
 
-	sanitized := make(map[string]interface{}, len(metadataMap))
-	for key, value := range metadataMap {
+	sanitized := make(map[string]interface{}, len(metadata))
+	for key, value := range metadata {
 		if key == "managedFields" {
 			continue
 		}
