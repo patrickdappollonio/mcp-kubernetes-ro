@@ -149,8 +149,8 @@ Do note that you'll need to mount your kubeconfig file into the container, and e
 
 There are **10 tools** available:
 
-- **`list_resources`**: List any Kubernetes resources by type with optional filtering, sorted newest first
-- **`get_resource`**: Get specific resource details
+- **`list_resources`**: List any Kubernetes resources by type with optional filtering, sorted newest first. `metadata.managedFields` is omitted by default unless `include_managed_fields=true`
+- **`get_resource`**: Get specific resource details. `metadata.managedFields` is omitted by default unless `include_managed_fields=true`
 - **`get_logs`**: Get pod logs with advanced filtering options including grep patterns, time filtering, and previous logs
 - **`get_pod_containers`**: List containers in a pod for log access
 - **`list_api_resources`**: List available Kubernetes API resources with their details (similar to kubectl api-resources)

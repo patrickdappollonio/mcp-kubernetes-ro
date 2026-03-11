@@ -66,6 +66,10 @@ type ListResourcesParams struct {
 	// TitleOnly when true (default), returns only metadata.name for each resource.
 	// When false, returns metadata, apiVersion, and kind.
 	TitleOnly *bool `json:"title_only,omitempty"`
+
+	// IncludeManagedFields when true, preserves metadata.managedFields in responses.
+	// By default, managed fields are omitted to reduce noise.
+	IncludeManagedFields bool `json:"include_managed_fields,omitempty"`
 }
 
 // ListResources implements the list_resources MCP tool.
@@ -120,7 +124,7 @@ func (h *ResourceHandler) ListResources(ctx context.Context, request mcp.CallToo
 		if titleOnly {
 			items[i] = extractResourceTitle(&resource)
 		} else {
-			items[i] = extractResourceSummary(&resource)
+			items[i] = extractResourceSummary(&resource, params.IncludeManagedFields)
 		}
 	}
 
@@ -182,6 +186,10 @@ type GetResourceParams struct {
 	// Context specifies which Kubernetes context to use for this operation.
 	// If empty, uses the current context from kubeconfig.
 	Context string `json:"context,omitempty"`
+
+	// IncludeManagedFields when true, preserves metadata.managedFields in responses.
+	// By default, managed fields are omitted to reduce noise.
+	IncludeManagedFields bool `json:"include_managed_fields,omitempty"`
 }
 
 // GetResource implements the get_resource MCP tool.
@@ -217,7 +225,7 @@ func (h *ResourceHandler) GetResource(ctx context.Context, request mcp.CallToolR
 		return response.Errorf("failed to get resource: %v", err)
 	}
 
-	return response.JSON(resource.Object)
+	return response.JSON(sanitizeResourceObject(resource.Object, params.IncludeManagedFields))
 }
 
 // extractResourceTitle extracts only the resource name for title-only listing operations.
@@ -237,7 +245,7 @@ func extractResourceTitle(resource *unstructured.Unstructured) map[string]interf
 // It returns a lightweight summary containing just metadata, apiVersion, and kind,
 // which is sufficient for most listing and browsing operations while minimizing
 // response size and processing time.
-func extractResourceSummary(resource *unstructured.Unstructured) map[string]interface{} {
+func extractResourceSummary(resource *unstructured.Unstructured, includeManagedFields bool) map[string]interface{} {
 	summary := make(map[string]interface{})
 
 	if apiVersion := resource.GetAPIVersion(); apiVersion != "" {
@@ -249,10 +257,46 @@ func extractResourceSummary(resource *unstructured.Unstructured) map[string]inte
 	}
 
 	if metadata := resource.Object["metadata"]; metadata != nil {
-		summary["metadata"] = metadata
+		summary["metadata"] = sanitizeMetadata(metadata, includeManagedFields)
 	}
 
 	return summary
+}
+
+func sanitizeResourceObject(resource map[string]interface{}, includeManagedFields bool) map[string]interface{} {
+	if includeManagedFields {
+		return resource
+	}
+
+	sanitized := make(map[string]interface{}, len(resource))
+	for key, value := range resource {
+		if key == "metadata" {
+			sanitized[key] = sanitizeMetadata(value, false)
+			continue
+		}
+
+		sanitized[key] = value
+	}
+
+	return sanitized
+}
+
+func sanitizeMetadata(metadata interface{}, includeManagedFields bool) interface{} {
+	metadataMap, ok := metadata.(map[string]interface{})
+	if !ok || includeManagedFields {
+		return metadata
+	}
+
+	sanitized := make(map[string]interface{}, len(metadataMap))
+	for key, value := range metadataMap {
+		if key == "managedFields" {
+			continue
+		}
+
+		sanitized[key] = value
+	}
+
+	return sanitized
 }
 
 // getCreationTime extracts the creation timestamp from a resource summary for sorting purposes.
@@ -457,7 +501,7 @@ func (h *ResourceHandler) GetTools() []MCPTool {
 	return []MCPTool{
 		NewMCPTool(
 			mcp.NewTool("list_resources",
-				mcp.WithDescription("List any Kubernetes resources by type with optional filtering, sorted newest first. Returns only resource names by default (title_only=true), or metadata, apiVersion, and kind when title_only=false."),
+				mcp.WithDescription("List any Kubernetes resources by type with optional filtering, sorted newest first. Returns only resource names by default (title_only=true), or metadata, apiVersion, and kind when title_only=false. metadata.managedFields is omitted unless include_managed_fields=true."),
 				mcp.WithString("resource_type",
 					mcp.Required(),
 					mcp.Description("The type of resource to list"),
@@ -487,12 +531,16 @@ func (h *ResourceHandler) GetTools() []MCPTool {
 					mcp.Description("When true (default), returns only resource names. When false, returns metadata, apiVersion, and kind"),
 					mcp.DefaultBool(true),
 				),
+				mcp.WithBoolean("include_managed_fields",
+					mcp.Description("When true, preserves metadata.managedFields in the response. By default these fields are omitted to reduce noise"),
+					mcp.DefaultBool(false),
+				),
 			),
 			h.ListResources,
 		),
 		NewMCPTool(
 			mcp.NewTool("get_resource",
-				mcp.WithDescription("Get specific resource details"),
+				mcp.WithDescription("Get specific resource details. metadata.managedFields is omitted unless include_managed_fields=true."),
 				mcp.WithString("resource_type",
 					mcp.Required(),
 					mcp.Description("The type of resource to get"),
@@ -509,6 +557,10 @@ func (h *ResourceHandler) GetTools() []MCPTool {
 				),
 				mcp.WithString("context",
 					mcp.Description("Kubernetes context to use (defaults to current context from kubeconfig)"),
+				),
+				mcp.WithBoolean("include_managed_fields",
+					mcp.Description("When true, preserves metadata.managedFields in the response. By default these fields are omitted to reduce noise"),
+					mcp.DefaultBool(false),
 				),
 			),
 			h.GetResource,
