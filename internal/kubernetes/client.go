@@ -308,7 +308,7 @@ func (c *Client) DiscoverResources(_ context.Context) ([]*metav1.APIResourceList
 // Returns a detailed error message with available resource types if the lookup fails.
 func (c *Client) ResolveResourceType(resourceType, apiVersion string) (schema.GroupVersionResource, error) {
 	lists, err := c.discoveryClient.ServerPreferredResources()
-	if err != nil {
+	if err != nil && len(lists) == 0 {
 		return schema.GroupVersionResource{}, fmt.Errorf("failed to discover resources: %w", err)
 	}
 
@@ -639,14 +639,14 @@ func (c *Client) TestConnectivity(ctx context.Context) error {
 			version.String(), c.namespace,
 		)
 	} else {
-		namespaces, err := c.clientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{Limit: 1})
+		_, err = c.clientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{Limit: 1})
 		if err != nil {
 			return fmt.Errorf("failed to list namespaces (check RBAC permissions): %w", err)
 		}
 
 		fmt.Fprintf(os.Stderr,
-			"✓ Successfully connected to Kubernetes cluster (version: %s, %d namespaces accessible)\n",
-			version.String(), len(namespaces.Items),
+			"✓ Successfully connected to Kubernetes cluster (version: %s)\n",
+			version.String(),
 		)
 	}
 	return nil
