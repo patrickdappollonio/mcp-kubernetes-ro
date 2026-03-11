@@ -106,6 +106,8 @@ type GetPodMetricsParams struct {
 // It retrieves CPU and memory usage metrics for cluster nodes from the metrics-server.
 // Supports both single-node queries and cluster-wide metrics with client-side pagination
 // for consistent ordering. Results are sorted by timestamp (newest first).
+//
+//nolint:hugeParam // mcp.CallToolRequest signature is required by MCP interface
 func (h *MetricsHandler) GetNodeMetrics(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	var params GetNodeMetricsParams
 	if err := request.BindArguments(&params); err != nil {
@@ -257,6 +259,8 @@ func (h *MetricsHandler) GetNodeMetrics(ctx context.Context, request mcp.CallToo
 // It retrieves CPU and memory usage metrics for cluster pods from the metrics-server.
 // Supports namespace-scoped, cluster-wide, and single-pod queries with client-side
 // pagination for consistent ordering. Results are sorted by timestamp (newest first).
+//
+//nolint:hugeParam // mcp.CallToolRequest signature is required by MCP interface
 func (h *MetricsHandler) GetPodMetrics(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	var params GetPodMetricsParams
 	if err := request.BindArguments(&params); err != nil {

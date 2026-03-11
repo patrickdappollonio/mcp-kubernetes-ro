@@ -31,6 +31,8 @@ func NewLogHandler(client *kubernetes.Client) *LogHandler {
 // pattern matching, time-based filtering, line limits, and container selection.
 // The logs can be filtered both by inclusion and exclusion patterns, supporting
 // both literal strings and regular expressions.
+//
+//nolint:hugeParam // mcp.CallToolRequest signature is required by MCP interface
 func (h *LogHandler) GetLogs(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	var params struct {
 		// Namespace specifies the pod's namespace.
@@ -168,6 +170,8 @@ func (h *LogHandler) GetLogs(ctx context.Context, request mcp.CallToolRequest) (
 // GetPodContainers implements the get_pod_containers MCP tool.
 // It retrieves the list of container names within a specific pod, which is useful
 // for identifying available containers before retrieving logs from multi-container pods.
+//
+//nolint:hugeParam // mcp.CallToolRequest signature is required by MCP interface
 func (h *LogHandler) GetPodContainers(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	var params struct {
 		// Namespace specifies the pod's namespace.
