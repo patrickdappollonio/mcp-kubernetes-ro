@@ -624,16 +624,30 @@ func (c *Client) TestConnectivity(ctx context.Context) error {
 		}
 	}
 
-	// Test 3: Try a simple API call to ensure we have basic permissions
-	namespaces, err := c.clientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{Limit: 1})
-	if err != nil {
-		return fmt.Errorf("failed to list namespaces (check RBAC permissions): %w", err)
-	}
+	// Test 3: Try a simple API call to ensure we have basic permissions.
+	// If a specific namespace is configured, only check access to that namespace
+	// (using Get instead of List) so that namespace-scoped users can start the server
+	// without requiring cluster-wide list permissions.
+	if c.namespace != "" {
+		_, err = c.clientset.CoreV1().Namespaces().Get(ctx, c.namespace, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to get namespace %q (check RBAC permissions): %w", c.namespace, err)
+		}
 
-	// Log successful connectivity with some basic cluster info
-	fmt.Fprintf(os.Stderr,
-		"✓ Successfully connected to Kubernetes cluster (version: %s, %d namespaces accessible)\n",
-		version.String(), len(namespaces.Items),
-	)
+		fmt.Fprintf(os.Stderr,
+			"✓ Successfully connected to Kubernetes cluster (version: %s, namespace: %s)\n",
+			version.String(), c.namespace,
+		)
+	} else {
+		namespaces, err := c.clientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{Limit: 1})
+		if err != nil {
+			return fmt.Errorf("failed to list namespaces (check RBAC permissions): %w", err)
+		}
+
+		fmt.Fprintf(os.Stderr,
+			"✓ Successfully connected to Kubernetes cluster (version: %s, %d namespaces accessible)\n",
+			version.String(), len(namespaces.Items),
+		)
+	}
 	return nil
 }
