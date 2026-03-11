@@ -17,6 +17,7 @@ The server leverages your local `kubectl` configuration (even when `kubectl` is 
 - **Base64 Utilities**: Encode and decode base64 data for Kubernetes secrets and configurations
 - **Multiple Transport Modes**: Support for both stdio and Server-Sent Events (SSE) communication
 - **Read-Only Security**: Complete prevention of destructive operations while maintaining full inspection capabilities
+- **Resource Access Control**: Disable access to specific Kubernetes resource types (e.g., Secrets) to prevent AI agents from querying sensitive data
 - **Namespace Support**: Work with specific namespaces or cluster-wide resources
 - **Advanced Filtering**: Support for label selectors, field selectors, and pagination
 - **Per-Command Context**: Specify different Kubernetes contexts for individual commands
@@ -61,7 +62,8 @@ Add the following configuration to your editor's settings to use `mcp-kubernetes
         // "--namespace=default",
         // "--transport=stdio",
         // "--port=8080",
-        // "--disabled-tools=get_logs,decode_base64"
+        // "--disabled-tools=get_logs,decode_base64",
+        // "--disabled-resources=secrets"
       ],
       "env": {
         // Set KUBECONFIG environment variable if needed:
@@ -69,7 +71,9 @@ Add the following configuration to your editor's settings to use `mcp-kubernetes
         // Set MCP_KUBERNETES_RO_DISABLED_TOOLS environment variable if needed:
         // "MCP_KUBERNETES_RO_DISABLED_TOOLS": "get_logs,decode_base64",
         // Or use generic DISABLED_TOOLS environment variable:
-        // "DISABLED_TOOLS": "get_logs,decode_base64"
+        // "DISABLED_TOOLS": "get_logs,decode_base64",
+        // Disable access to specific resource types:
+        // "MCP_KUBERNETES_RO_DISABLED_RESOURCES": "secrets,configmaps"
       }
     }
   }
@@ -93,7 +97,8 @@ You can also simplify the installation process by using it as an `npx` package:
         // "--namespace=default",
         // "--transport=stdio",
         // "--port=8080",
-        // "--disabled-tools=get_logs,decode_base64"
+        // "--disabled-tools=get_logs,decode_base64",
+        // "--disabled-resources=secrets"
       ],
       "env": {
         // Set KUBECONFIG environment variable if needed:
@@ -101,7 +106,9 @@ You can also simplify the installation process by using it as an `npx` package:
         // Set MCP_KUBERNETES_RO_DISABLED_TOOLS environment variable if needed:
         // "MCP_KUBERNETES_RO_DISABLED_TOOLS": "get_logs,decode_base64",
         // Or use generic DISABLED_TOOLS environment variable:
-        // "DISABLED_TOOLS": "get_logs,decode_base64"
+        // "DISABLED_TOOLS": "get_logs,decode_base64",
+        // Disable access to specific resource types:
+        // "MCP_KUBERNETES_RO_DISABLED_RESOURCES": "secrets,configmaps"
       }
     }
   }
@@ -122,7 +129,9 @@ And this is how to leverage the Docker image instead:
         "-e", "KUBECONFIG=/root/.kube/config",
         "-v", "/path/to/kubeconfig:/root/.kube/config",
         "ghcr.io/patrickdappollonio/mcp-kubernetes-ro"
-        // Place additional flags here, like --disabled-tools=get_logs,decode_base64
+        // Place additional flags here, like:
+        // "--disabled-tools=get_logs,decode_base64",
+        // "--disabled-resources=secrets"
       ],
       "env": {
         // Set KUBECONFIG environment variable if needed:
@@ -130,7 +139,9 @@ And this is how to leverage the Docker image instead:
         // Set MCP_KUBERNETES_RO_DISABLED_TOOLS environment variable if needed:
         // "MCP_KUBERNETES_RO_DISABLED_TOOLS": "get_logs,decode_base64",
         // Or use generic DISABLED_TOOLS environment variable:
-        // "DISABLED_TOOLS": "get_logs,decode_base64"
+        // "DISABLED_TOOLS": "get_logs,decode_base64",
+        // Disable access to specific resource types:
+        // "MCP_KUBERNETES_RO_DISABLED_RESOURCES": "secrets,configmaps"
       }
     },
   }
@@ -168,22 +179,23 @@ There are **10 tools** available by default, plus **3 additional tools** when po
 
 ### Disabling Tools
 
-You can disable specific tools using either the `--disabled-tools` command line flag or environment variables with a comma-separated list of tool names. Two environment variables are supported to accommodate different use cases:
+You can disable specific tools using the `--disabled-tools` flag or the `MCP_KUBERNETES_RO_DISABLED_TOOLS` / `DISABLED_TOOLS` environment variables. The flag is repeatable and accepts comma-separated values:
 
-- **`MCP_KUBERNETES_RO_DISABLED_TOOLS`**: App-specific variable that won't conflict with other tools
-- **`DISABLED_TOOLS`**: Generic variable that can be shared across multiple tools in your environment
+```bash
+# Comma-separated
+mcp-kubernetes-ro --disabled-tools=get_logs,decode_base64
 
-**Priority order**:
-1. **Command line flag**: `--disabled-tools=NAMES` (highest priority)
-2. **App-specific environment variable**: `MCP_KUBERNETES_RO_DISABLED_TOOLS`
-3. **Generic environment variable**: `DISABLED_TOOLS`
+# Repeated flags
+mcp-kubernetes-ro --disabled-tools=get_logs --disabled-tools=decode_base64
 
-This is useful for:
+# Using environment variable
+export MCP_KUBERNETES_RO_DISABLED_TOOLS=get_logs,decode_base64
+mcp-kubernetes-ro
+```
 
-- **Security**: Disable tools that might expose sensitive information (e.g., `get_logs`, `decode_base64`)
-- **Performance**: Disable resource-intensive tools when not needed (e.g., `get_node_metrics`, `get_pod_metrics`)
-- **Environment-specific**: Disable tools that aren't available in your cluster (e.g., metrics tools when metrics server is not installed)
-- **Compliance**: Restrict functionality to meet organizational policies
+Values from flags and environment variables are merged. If the `MCP_KUBERNETES_RO_DISABLED_TOOLS` env var is not set, `DISABLED_TOOLS` is used as a fallback.
+
+When a tool is disabled, it will not be registered with the MCP server and will not appear in the available tools list. A message will be logged to stderr indicating which tools have been skipped.
 
 **Available tool names for disabling:**
 - `list_resources`
@@ -200,34 +212,45 @@ This is useful for:
 - `stop_port_forward` *(only when port forwarding is enabled)*
 - `list_port_forwards` *(only when port forwarding is enabled)*
 
-When a tool is disabled, it will not be registered with the MCP server and will not appear in the available tools list. A message will be logged to stderr indicating which tools have been skipped.
+### Disabling Access to Specific Resources
 
-**Examples:**
+You can prevent AI agents from querying specific Kubernetes resource types using the `--disabled-resources` flag or the `MCP_KUBERNETES_RO_DISABLED_RESOURCES` environment variable. This is particularly useful for preventing access to sensitive resources like Secrets.
+
+Resources can be specified by name (singular, plural, kind, or short name) or as a full `group/version/resource` triple. The `core` keyword is used as an alias for the Kubernetes core API group. All names are resolved against the cluster's discovery API at startup, so singular names, kind names, and short names are all accepted:
+
 ```bash
-# Using command line flag (highest priority)
-mcp-kubernetes-ro --disabled-tools=encode_base64,decode_base64,get_logs
+# By resource name (resolved via the cluster's discovery API)
+mcp-kubernetes-ro --disabled-resources=secrets
 
-# Using app-specific environment variable
-export MCP_KUBERNETES_RO_DISABLED_TOOLS=encode_base64,decode_base64,get_logs
+# Singular, kind, and short names all work
+mcp-kubernetes-ro --disabled-resources=secret      # singular
+mcp-kubernetes-ro --disabled-resources=Secret      # kind
+mcp-kubernetes-ro --disabled-resources=cm          # short name for configmaps
+
+# Full group/version/resource format
+mcp-kubernetes-ro --disabled-resources=core/v1/secrets
+
+# Multiple resources (comma-separated or repeated flags)
+mcp-kubernetes-ro --disabled-resources=secrets,configmaps
+mcp-kubernetes-ro --disabled-resources=secrets --disabled-resources=configmaps
+
+# Non-core API groups
+mcp-kubernetes-ro --disabled-resources=apps/v1/deployments
+
+# Using environment variable
+export MCP_KUBERNETES_RO_DISABLED_RESOURCES=secrets,configmaps
 mcp-kubernetes-ro
-
-# Using generic environment variable
-export DISABLED_TOOLS=encode_base64,decode_base64,get_logs
-mcp-kubernetes-ro
-
-# Priority demonstration: command line flag overrides environment variables
-export MCP_KUBERNETES_RO_DISABLED_TOOLS=get_logs
-export DISABLED_TOOLS=get_pod_metrics
-mcp-kubernetes-ro --disabled-tools=encode_base64,decode_base64
-
-# Priority demonstration: app-specific env var overrides generic env var
-export MCP_KUBERNETES_RO_DISABLED_TOOLS=encode_base64,decode_base64
-export DISABLED_TOOLS=get_logs,get_pod_metrics
-mcp-kubernetes-ro
-
-# Output: Skipping disabled tool: "encode_base64"
-# Output: Skipping disabled tool: "decode_base64"
 ```
+
+When a disabled resource is queried via `list_resources` or `get_resource`, the server returns a clear error:
+
+```
+access to resource "secrets" (core/v1/secrets) is disabled by configuration and cannot be queried
+```
+
+Disabled resources are also hidden from `list_api_resources` output, so AI agents won't discover them as available.
+
+If a resource name cannot be resolved against the cluster (e.g., a typo or a CRD that doesn't exist), the server will refuse to start with a descriptive error — ensuring disabled resources always take effect.
 
 ## Running Modes
 
@@ -261,10 +284,11 @@ The following command-line flags are available to configure the MCP server:
 - `--transport=TYPE`: Transport type: `stdio` or `sse` (default: `stdio`)
 - `--port=PORT`: Port for SSE server (default: 8080, only used with `--transport=sse`)
 
-### Tool Management
-- `--disabled-tools=NAMES`: Comma-separated list of tool names to disable (optional)
-- `MCP_KUBERNETES_RO_DISABLED_TOOLS`: App-specific environment variable for disabled tools (command line flag takes priority)
-- `DISABLED_TOOLS`: Generic environment variable for disabled tools (lower priority than `MCP_KUBERNETES_RO_DISABLED_TOOLS`)
+### Tool and Resource Management
+- `--disabled-tools=NAMES`: Tool names to disable, repeatable and comma-separated (optional)
+- `--disabled-resources=RESOURCES`: Resource types to block, repeatable and comma-separated (optional). Accepts resource names (`secrets`, `deploy`, `cm`) or full specs (`core/v1/secrets`, `apps/v1/deployments`)
+- `MCP_KUBERNETES_RO_DISABLED_TOOLS`: Environment variable for disabled tools (merged with flag values, fallback: `DISABLED_TOOLS`)
+- `MCP_KUBERNETES_RO_DISABLED_RESOURCES`: Environment variable for disabled resources (merged with flag values)
 
 ### Port Forwarding
 - `--enable-port-forwarding`: Enable port forwarding tools (disabled by default)
@@ -807,23 +831,19 @@ mcp-kubernetes-ro --disabled-tools=get_logs,decode_base64
 # Disable metrics tools when metrics server is not available
 mcp-kubernetes-ro --disabled-tools=get_node_metrics,get_pod_metrics
 
-# Disable multiple tools in production environment
+# Prevent AI agents from reading Secrets and ConfigMaps
+mcp-kubernetes-ro --disabled-resources=secrets --disabled-resources=configmaps
+
+# Lock down a production environment: no logs, no secrets, no base64 decoding
 mcp-kubernetes-ro \
   --kubeconfig ~/.kube/prod-config \
-  --disabled-tools=encode_base64,decode_base64,get_logs
+  --disabled-tools=get_logs,decode_base64 \
+  --disabled-resources=secrets
 
-# Use app-specific environment variable for disabled tools
+# Use environment variables for disabled tools and resources
 export MCP_KUBERNETES_RO_DISABLED_TOOLS=get_logs,decode_base64
+export MCP_KUBERNETES_RO_DISABLED_RESOURCES=secrets
 mcp-kubernetes-ro
-
-# Use generic environment variable for disabled tools
-export DISABLED_TOOLS=get_logs,decode_base64
-mcp-kubernetes-ro
-
-# Command line flag takes priority over both environment variables
-export MCP_KUBERNETES_RO_DISABLED_TOOLS=get_logs,decode_base64
-export DISABLED_TOOLS=get_pod_metrics
-mcp-kubernetes-ro --disabled-tools=get_node_metrics,get_pod_metrics
 ```
 
 ## Use Cases
@@ -898,7 +918,7 @@ The MCP server performs an automatic connectivity check on startup to verify tha
 On successful startup, you'll see output like:
 ```
 Testing connectivity to Kubernetes cluster...
-✓ Successfully connected to Kubernetes cluster (version: v1.28.0, 4 namespaces accessible)
+✓ Successfully connected to Kubernetes cluster (version: v1.28.0)
 ```
 
 ### Troubleshooting Connectivity Issues
@@ -915,6 +935,7 @@ The connectivity check has a 30-second timeout to prevent hanging on unresponsiv
 ## Security Considerations
 
 - **Read-Only Access**: The server only supports read operations (`get`, `list`, `watch`)
+- **Resource Access Control**: Block AI agents from querying specific resource types (e.g., Secrets) using `--disabled-resources`
 - **Local Authentication**: Uses your existing kubectl configuration and credentials
 - **No Destructive Operations**: Cannot create, update, or delete resources
 - **Namespace Isolation**: Respects RBAC permissions from your kubeconfig
