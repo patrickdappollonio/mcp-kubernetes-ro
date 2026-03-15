@@ -49,6 +49,7 @@ var (
 	disabledTools        stringSlice
 	disabledResources    stringSlice
 	enablePortForwarding = flag.Bool("enable-port-forwarding", false, "Enable port forwarding tools (start_port_forward, stop_port_forward, list_port_forwards)")
+	alwaysStart          = flag.Bool("always-start", false, "Skip the startup connectivity check and start the MCP server immediately. Useful for short-lived or browser-flow OIDC credentials that are not yet valid at process start. Connectivity and authentication errors will be reported as tool call failures instead of preventing startup.")
 	version              = "dev"
 )
 
@@ -86,6 +87,14 @@ func main() {
 		}
 	}
 
+	// Resolve always-start flag from CLI or environment variable
+	alwaysStartEnabled := *alwaysStart
+	if !alwaysStartEnabled {
+		if val := strings.TrimSpace(os.Getenv("MCP_KUBERNETES_RO_ALWAYS_START")); val != "" {
+			alwaysStartEnabled = strings.EqualFold(val, "true") || val == "1" || strings.EqualFold(val, "yes")
+		}
+	}
+
 	kubeConfig := &kubernetes.Config{
 		Kubeconfig: *kubeconfig,
 		Namespace:  *namespace,
@@ -96,27 +105,44 @@ func main() {
 		log.Fatalf("Failed to create Kubernetes client: %v", err)
 	}
 
-	// Test connectivity to the cluster to ensure we can operate otherwise
-	// prevent the MCP server from starting
-	fmt.Fprintln(os.Stderr, "Testing connectivity to Kubernetes cluster...")
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	if err := client.TestConnectivity(ctx); err != nil {
-		cancel()
-		log.Fatalf("Failed to connect to Kubernetes cluster: %v\n\nPlease check:\n- Your kubeconfig file is valid\n- The cluster is accessible\n- You have the necessary RBAC permissions\n- The cluster is running and responding", err)
+	if alwaysStartEnabled {
+		// Skip the connectivity check and start immediately. Connectivity and
+		// authentication errors will be surfaced as tool call failures instead.
+		fmt.Fprintln(os.Stderr, "Skipping connectivity check (--always-start), starting MCP server immediately...")
+	} else {
+		// Test connectivity to the cluster to ensure we can operate, otherwise
+		// prevent the MCP server from starting.
+		fmt.Fprintln(os.Stderr, "Testing connectivity to Kubernetes cluster...")
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := client.TestConnectivity(ctx); err != nil {
+			cancel()
+			log.Fatalf("Failed to connect to Kubernetes cluster: %v\n\nPlease check:\n- Your kubeconfig file is valid\n- The cluster is accessible\n- You have the necessary RBAC permissions\n- The cluster is running and responding", err)
+		}
+		cancel() // Clean up the context
+		fmt.Fprintln(os.Stderr, "Connected to Kubernetes cluster, starting MCP server...")
 	}
-	cancel() // Clean up the context
-	fmt.Fprintln(os.Stderr, "Connected to Kubernetes cluster, starting MCP server...")
 
 	// Create resource filter for disabled resources, using the client to
-	// resolve user-friendly names (singular, kind, short names) to canonical GVRs
-	resFilter, err := resourcefilter.NewFilter(strings.Join(disabledResources, ","), client)
+	// resolve user-friendly names (singular, kind, short names) to canonical GVRs.
+	// In --always-start mode the filter is lazy: name resolution is deferred to
+	// the first tool call so that a live cluster connection is not required at startup.
+	var resFilter *resourcefilter.Filter
+	if alwaysStartEnabled {
+		resFilter, err = resourcefilter.NewLazyFilter(strings.Join(disabledResources, ","), client)
+	} else {
+		resFilter, err = resourcefilter.NewFilter(strings.Join(disabledResources, ","), client)
+	}
 	if err != nil {
 		log.Fatalf("Failed to parse disabled resources: %v", err)
 	}
-	if resFilter.HasDisabledResources() {
+	if !alwaysStartEnabled && resFilter.HasDisabledResources() {
+		// In eager mode we can log the resolved canonical names immediately.
 		for _, res := range resFilter.GetDisabledResources() {
 			fmt.Fprintf(os.Stderr, "Disabling access to resource: %q\n", res)
 		}
+	} else if alwaysStartEnabled && resFilter.HasDisabledResources() {
+		// In lazy mode log the raw input; canonical names are resolved on first use.
+		fmt.Fprintf(os.Stderr, "Resource filter configured (will be applied on first tool call): %s\n", strings.Join(disabledResources, ", "))
 	}
 
 	// Define tools and handlers

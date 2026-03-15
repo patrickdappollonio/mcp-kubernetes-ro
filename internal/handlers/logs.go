@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/patrickdappollonio/mcp-kubernetes-ro/internal/connectivity"
 	"github.com/patrickdappollonio/mcp-kubernetes-ro/internal/kubernetes"
 	"github.com/patrickdappollonio/mcp-kubernetes-ro/internal/logfilter"
 	"github.com/patrickdappollonio/mcp-kubernetes-ro/internal/response"
@@ -75,6 +76,9 @@ func (h *LogHandler) GetLogs(ctx context.Context, request mcp.CallToolRequest) (
 	// Use the appropriate client based on context
 	client, err := h.client.ForContext(params.Context)
 	if err != nil {
+		if connectivity.IsError(err) {
+			return response.Error(connectivity.ErrorMessage(err))
+		}
 		return nil, fmt.Errorf("failed to create client with context %s: %w", params.Context, err)
 	}
 
@@ -130,6 +134,9 @@ func (h *LogHandler) GetLogs(ctx context.Context, request mcp.CallToolRequest) (
 	// Get logs
 	logs, err := client.GetPodLogsWithOptions(ctx, params.Namespace, params.Name, logOpts)
 	if err != nil {
+		if connectivity.IsError(err) {
+			return response.Error(connectivity.ErrorMessage(err))
+		}
 		return nil, fmt.Errorf("failed to get pod logs: %w", err)
 	}
 
@@ -191,11 +198,17 @@ func (h *LogHandler) GetPodContainers(ctx context.Context, request mcp.CallToolR
 	// Use the appropriate client based on context
 	client, err := h.client.ForContext(params.Context)
 	if err != nil {
+		if connectivity.IsError(err) {
+			return response.Error(connectivity.ErrorMessage(err))
+		}
 		return nil, fmt.Errorf("failed to create client with context %s: %w", params.Context, err)
 	}
 
 	containers, err := client.GetPodContainers(ctx, params.Namespace, params.Name)
 	if err != nil {
+		if connectivity.IsError(err) {
+			return response.Error(connectivity.ErrorMessage(err))
+		}
 		return nil, fmt.Errorf("failed to get pod containers: %w", err)
 	}
 

@@ -63,7 +63,8 @@ Add the following configuration to your editor's settings to use `mcp-kubernetes
         // "--transport=stdio",
         // "--port=8080",
         // "--disabled-tools=get_logs,decode_base64",
-        // "--disabled-resources=secrets"
+        // "--disabled-resources=secrets",
+        // "--always-start"
       ],
       "env": {
         // Set KUBECONFIG environment variable if needed:
@@ -73,7 +74,9 @@ Add the following configuration to your editor's settings to use `mcp-kubernetes
         // Or use generic DISABLED_TOOLS environment variable:
         // "DISABLED_TOOLS": "get_logs,decode_base64",
         // Disable access to specific resource types:
-        // "MCP_KUBERNETES_RO_DISABLED_RESOURCES": "secrets,configmaps"
+        // "MCP_KUBERNETES_RO_DISABLED_RESOURCES": "secrets,configmaps",
+        // Skip startup connectivity check via environment variable:
+        // "MCP_KUBERNETES_RO_ALWAYS_START": "true"
       }
     }
   }
@@ -936,7 +939,19 @@ If the connectivity check fails, you'll see a detailed error message. Common iss
 - **Authentication failed**: Ensure your credentials haven't expired and are valid
 - **Insufficient permissions**: Verify you have at least read access to basic cluster resources
 
-The connectivity check has a 30-second timeout to prevent hanging on unresponsive clusters.
+The connectivity check has a 10-second timeout to prevent hanging on unresponsive clusters.
+
+### Skipping the Connectivity Check (`--always-start`)
+
+If your credentials are granted via an OIDC browser-flow or another mechanism where the token is not yet valid when the MCP server process starts, use the `--always-start` flag (or `MCP_KUBERNETES_RO_ALWAYS_START=true` environment variable) to skip the startup connectivity check entirely:
+
+```bash
+mcp-kubernetes-ro --always-start
+```
+
+With `--always-start`, the server starts immediately without contacting the cluster. The connectivity check is effectively deferred: the first time a tool is called, it will attempt to reach the cluster normally. If the cluster is unreachable or the credentials have expired at that point, the tool will return a structured error message to the AI instructing it not to retry automatically and to prompt you to re-authenticate.
+
+Resource filters configured via `--disabled-resources` are similarly deferred: name resolution happens on the first tool call rather than at startup, so no cluster connection is required to start the server.
 
 ## Security Considerations
 

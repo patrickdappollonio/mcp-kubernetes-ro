@@ -11,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	"github.com/patrickdappollonio/mcp-kubernetes-ro/internal/connectivity"
 	"github.com/patrickdappollonio/mcp-kubernetes-ro/internal/kubernetes"
 	"github.com/patrickdappollonio/mcp-kubernetes-ro/internal/resourcefilter"
 	"github.com/patrickdappollonio/mcp-kubernetes-ro/internal/response"
@@ -93,15 +94,27 @@ func (h *ResourceHandler) ListResources(ctx context.Context, request mcp.CallToo
 	// Use the appropriate client based on context
 	client, err := h.client.ForContext(params.Context)
 	if err != nil {
+		if connectivity.IsError(err) {
+			return response.Error(connectivity.ErrorMessage(err))
+		}
 		return response.Errorf("failed to create client with context %s: %v", params.Context, err)
 	}
 
 	gvr, err := client.ResolveResourceType(params.ResourceType, params.APIVersion)
 	if err != nil {
+		if connectivity.IsError(err) {
+			return response.Error(connectivity.ErrorMessage(err))
+		}
 		return response.Errorf("failed to resolve resource type: %v", err)
 	}
 
 	if h.resourceFilter != nil && h.resourceFilter.IsDisabled(gvr) {
+		if initErr := h.resourceFilter.InitError(); initErr != nil {
+			if connectivity.IsError(initErr) {
+				return response.Error(connectivity.ErrorMessage(initErr))
+			}
+			return response.Errorf("resource filter could not be initialized: %v", initErr)
+		}
 		return response.Errorf("access to resource %q (%s) is disabled by configuration and cannot be queried",
 			params.ResourceType, resourcefilter.FormatGVR(gvr))
 	}
@@ -118,6 +131,9 @@ func (h *ResourceHandler) ListResources(ctx context.Context, request mcp.CallToo
 
 	resources, err := client.ListResources(ctx, gvr, params.Namespace, listOptions)
 	if err != nil {
+		if connectivity.IsError(err) {
+			return response.Error(connectivity.ErrorMessage(err))
+		}
 		return response.Errorf("failed to list resources: %v", err)
 	}
 
@@ -221,21 +237,36 @@ func (h *ResourceHandler) GetResource(ctx context.Context, request mcp.CallToolR
 	// Use the appropriate client based on context
 	client, err := h.client.ForContext(params.Context)
 	if err != nil {
+		if connectivity.IsError(err) {
+			return response.Error(connectivity.ErrorMessage(err))
+		}
 		return response.Errorf("failed to create client with context %s: %v", params.Context, err)
 	}
 
 	gvr, err := client.ResolveResourceType(params.ResourceType, params.APIVersion)
 	if err != nil {
+		if connectivity.IsError(err) {
+			return response.Error(connectivity.ErrorMessage(err))
+		}
 		return response.Errorf("failed to resolve resource type: %v", err)
 	}
 
 	if h.resourceFilter != nil && h.resourceFilter.IsDisabled(gvr) {
+		if initErr := h.resourceFilter.InitError(); initErr != nil {
+			if connectivity.IsError(initErr) {
+				return response.Error(connectivity.ErrorMessage(initErr))
+			}
+			return response.Errorf("resource filter could not be initialized: %v", initErr)
+		}
 		return response.Errorf("access to resource %q (%s) is disabled by configuration and cannot be queried",
 			params.ResourceType, resourcefilter.FormatGVR(gvr))
 	}
 
 	resource, err := client.GetResource(ctx, gvr, params.Namespace, params.Name)
 	if err != nil {
+		if connectivity.IsError(err) {
+			return response.Error(connectivity.ErrorMessage(err))
+		}
 		return response.Errorf("failed to get resource: %v", err)
 	}
 
@@ -384,7 +415,21 @@ func (h *ResourceHandler) ListAPIResources(ctx context.Context, request mcp.Call
 	}
 	lists, err := h.client.DiscoverResources(ctx)
 	if err != nil {
+		if connectivity.IsError(err) {
+			return response.Error(connectivity.ErrorMessage(err))
+		}
 		return response.Errorf("failed to discover API resources: %v", err)
+	}
+
+	// In lazy-filter mode, resolution is triggered by the first IsDisabled/MatchesAPIResource
+	// call below. Check for a prior init error before iterating.
+	if h.resourceFilter != nil {
+		if initErr := h.resourceFilter.InitError(); initErr != nil {
+			if connectivity.IsError(initErr) {
+				return response.Error(connectivity.ErrorMessage(initErr))
+			}
+			return response.Errorf("resource filter could not be initialized: %v", initErr)
+		}
 	}
 
 	// Determine whether to show title only (default to true)
@@ -485,6 +530,9 @@ func (h *ResourceHandler) ListContexts(_ context.Context, request mcp.CallToolRe
 
 	contexts, err := h.client.ListContexts()
 	if err != nil {
+		if connectivity.IsError(err) {
+			return response.Error(connectivity.ErrorMessage(err))
+		}
 		return response.Errorf("failed to list contexts: %v", err)
 	}
 
