@@ -146,9 +146,9 @@ func main() {
 	}
 
 	// Define tools and handlers
-	resourceHandler := handlers.NewResourceHandler(client, resFilter)
-	logHandler := handlers.NewLogHandler(client)
-	metricsHandler := handlers.NewMetricsHandler(client)
+	resourceHandler := handlers.NewResourceHandler(client, resFilter, alwaysStartEnabled)
+	logHandler := handlers.NewLogHandler(client, alwaysStartEnabled)
+	metricsHandler := handlers.NewMetricsHandler(client, alwaysStartEnabled)
 	utilsHandler := handlers.NewUtilsHandler()
 
 	// Create port-forward manager (may be nil if not enabled)
@@ -203,7 +203,7 @@ func main() {
 	}
 
 	if portForwardingEnabled {
-		portForwardHandler := handlers.NewPortForwardHandler(client, pfManager)
+		portForwardHandler := handlers.NewPortForwardHandler(client, pfManager, alwaysStartEnabled)
 		allHandlers = append(allHandlers, portForwardHandler)
 	}
 

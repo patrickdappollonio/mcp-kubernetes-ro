@@ -24,14 +24,19 @@ import (
 type ResourceHandler struct {
 	client         *kubernetes.Client
 	resourceFilter *resourcefilter.Filter
+	alwaysStart    bool
 }
 
 // NewResourceHandler creates a new ResourceHandler with the provided Kubernetes client
 // and an optional resource filter for blocking access to specific resource types.
-func NewResourceHandler(client *kubernetes.Client, filter *resourcefilter.Filter) *ResourceHandler {
+// alwaysStart mirrors the --always-start flag: when true, connectivity and auth errors
+// are intercepted and returned as structured tool errors so the LLM can surface them
+// to the user rather than treating them as retryable failures.
+func NewResourceHandler(client *kubernetes.Client, filter *resourcefilter.Filter, alwaysStart bool) *ResourceHandler {
 	return &ResourceHandler{
 		client:         client,
 		resourceFilter: filter,
+		alwaysStart:    alwaysStart,
 	}
 }
 
@@ -94,7 +99,7 @@ func (h *ResourceHandler) ListResources(ctx context.Context, request mcp.CallToo
 	// Use the appropriate client based on context
 	client, err := h.client.ForContext(params.Context)
 	if err != nil {
-		if connectivity.IsTransportError(err) {
+		if h.alwaysStart && connectivity.IsTransportError(err) {
 			return response.Error(connectivity.ErrorMessage(err))
 		}
 		return response.Errorf("failed to create client with context %s: %v", params.Context, err)
@@ -102,7 +107,7 @@ func (h *ResourceHandler) ListResources(ctx context.Context, request mcp.CallToo
 
 	gvr, err := client.ResolveResourceType(params.ResourceType, params.APIVersion)
 	if err != nil {
-		if connectivity.IsError(err) {
+		if h.alwaysStart && connectivity.IsError(err) {
 			return response.Error(connectivity.ErrorMessage(err))
 		}
 		return response.Errorf("failed to resolve resource type: %v", err)
@@ -110,7 +115,7 @@ func (h *ResourceHandler) ListResources(ctx context.Context, request mcp.CallToo
 
 	if h.resourceFilter != nil && h.resourceFilter.IsDisabled(gvr) {
 		if initErr := h.resourceFilter.InitError(); initErr != nil {
-			if connectivity.IsError(initErr) {
+			if h.alwaysStart && connectivity.IsError(initErr) {
 				return response.Error(connectivity.ErrorMessage(initErr))
 			}
 			return response.Errorf("resource filter could not be initialized: %v", initErr)
@@ -131,7 +136,7 @@ func (h *ResourceHandler) ListResources(ctx context.Context, request mcp.CallToo
 
 	resources, err := client.ListResources(ctx, gvr, params.Namespace, listOptions)
 	if err != nil {
-		if connectivity.IsTransportError(err) {
+		if h.alwaysStart && connectivity.IsTransportError(err) {
 			return response.Error(connectivity.ErrorMessage(err))
 		}
 		return response.Errorf("failed to list resources: %v", err)
@@ -237,7 +242,7 @@ func (h *ResourceHandler) GetResource(ctx context.Context, request mcp.CallToolR
 	// Use the appropriate client based on context
 	client, err := h.client.ForContext(params.Context)
 	if err != nil {
-		if connectivity.IsTransportError(err) {
+		if h.alwaysStart && connectivity.IsTransportError(err) {
 			return response.Error(connectivity.ErrorMessage(err))
 		}
 		return response.Errorf("failed to create client with context %s: %v", params.Context, err)
@@ -245,7 +250,7 @@ func (h *ResourceHandler) GetResource(ctx context.Context, request mcp.CallToolR
 
 	gvr, err := client.ResolveResourceType(params.ResourceType, params.APIVersion)
 	if err != nil {
-		if connectivity.IsError(err) {
+		if h.alwaysStart && connectivity.IsError(err) {
 			return response.Error(connectivity.ErrorMessage(err))
 		}
 		return response.Errorf("failed to resolve resource type: %v", err)
@@ -253,7 +258,7 @@ func (h *ResourceHandler) GetResource(ctx context.Context, request mcp.CallToolR
 
 	if h.resourceFilter != nil && h.resourceFilter.IsDisabled(gvr) {
 		if initErr := h.resourceFilter.InitError(); initErr != nil {
-			if connectivity.IsError(initErr) {
+			if h.alwaysStart && connectivity.IsError(initErr) {
 				return response.Error(connectivity.ErrorMessage(initErr))
 			}
 			return response.Errorf("resource filter could not be initialized: %v", initErr)
@@ -264,7 +269,7 @@ func (h *ResourceHandler) GetResource(ctx context.Context, request mcp.CallToolR
 
 	resource, err := client.GetResource(ctx, gvr, params.Namespace, params.Name)
 	if err != nil {
-		if connectivity.IsTransportError(err) {
+		if h.alwaysStart && connectivity.IsTransportError(err) {
 			return response.Error(connectivity.ErrorMessage(err))
 		}
 		return response.Errorf("failed to get resource: %v", err)
@@ -415,7 +420,7 @@ func (h *ResourceHandler) ListAPIResources(ctx context.Context, request mcp.Call
 	}
 	lists, err := h.client.DiscoverResources(ctx)
 	if err != nil {
-		if connectivity.IsError(err) {
+		if h.alwaysStart && connectivity.IsError(err) {
 			return response.Error(connectivity.ErrorMessage(err))
 		}
 		return response.Errorf("failed to discover API resources: %v", err)
@@ -425,7 +430,7 @@ func (h *ResourceHandler) ListAPIResources(ctx context.Context, request mcp.Call
 	// call below. Check for a prior init error before iterating.
 	if h.resourceFilter != nil {
 		if initErr := h.resourceFilter.InitError(); initErr != nil {
-			if connectivity.IsError(initErr) {
+			if h.alwaysStart && connectivity.IsError(initErr) {
 				return response.Error(connectivity.ErrorMessage(initErr))
 			}
 			return response.Errorf("resource filter could not be initialized: %v", initErr)
@@ -530,7 +535,7 @@ func (h *ResourceHandler) ListContexts(_ context.Context, request mcp.CallToolRe
 
 	contexts, err := h.client.ListContexts()
 	if err != nil {
-		if connectivity.IsTransportError(err) {
+		if h.alwaysStart && connectivity.IsTransportError(err) {
 			return response.Error(connectivity.ErrorMessage(err))
 		}
 		return response.Errorf("failed to list contexts: %v", err)

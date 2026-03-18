@@ -17,13 +17,18 @@ import (
 // It supports advanced log filtering with grep-like capabilities, time-based filtering,
 // container selection in multi-container pods, and access to previous container logs.
 type LogHandler struct {
-	client *kubernetes.Client
+	client      *kubernetes.Client
+	alwaysStart bool
 }
 
 // NewLogHandler creates a new LogHandler with the provided Kubernetes client.
-func NewLogHandler(client *kubernetes.Client) *LogHandler {
+// alwaysStart mirrors the --always-start flag: when true, connectivity and auth errors
+// are intercepted and returned as structured tool errors so the LLM can surface them
+// to the user rather than treating them as retryable failures.
+func NewLogHandler(client *kubernetes.Client, alwaysStart bool) *LogHandler {
 	return &LogHandler{
-		client: client,
+		client:      client,
+		alwaysStart: alwaysStart,
 	}
 }
 
@@ -76,7 +81,7 @@ func (h *LogHandler) GetLogs(ctx context.Context, request mcp.CallToolRequest) (
 	// Use the appropriate client based on context
 	client, err := h.client.ForContext(params.Context)
 	if err != nil {
-		if connectivity.IsTransportError(err) {
+		if h.alwaysStart && connectivity.IsTransportError(err) {
 			return response.Error(connectivity.ErrorMessage(err))
 		}
 		return response.Errorf("failed to create client with context %s: %v", params.Context, err)
@@ -134,7 +139,7 @@ func (h *LogHandler) GetLogs(ctx context.Context, request mcp.CallToolRequest) (
 	// Get logs
 	logs, err := client.GetPodLogsWithOptions(ctx, params.Namespace, params.Name, logOpts)
 	if err != nil {
-		if connectivity.IsTransportError(err) {
+		if h.alwaysStart && connectivity.IsTransportError(err) {
 			return response.Error(connectivity.ErrorMessage(err))
 		}
 		return nil, fmt.Errorf("failed to get pod logs: %w", err)
@@ -198,7 +203,7 @@ func (h *LogHandler) GetPodContainers(ctx context.Context, request mcp.CallToolR
 	// Use the appropriate client based on context
 	client, err := h.client.ForContext(params.Context)
 	if err != nil {
-		if connectivity.IsTransportError(err) {
+		if h.alwaysStart && connectivity.IsTransportError(err) {
 			return response.Error(connectivity.ErrorMessage(err))
 		}
 		return nil, fmt.Errorf("failed to create client with context %s: %w", params.Context, err)
@@ -206,7 +211,7 @@ func (h *LogHandler) GetPodContainers(ctx context.Context, request mcp.CallToolR
 
 	containers, err := client.GetPodContainers(ctx, params.Namespace, params.Name)
 	if err != nil {
-		if connectivity.IsTransportError(err) {
+		if h.alwaysStart && connectivity.IsTransportError(err) {
 			return response.Error(connectivity.ErrorMessage(err))
 		}
 		return nil, fmt.Errorf("failed to get pod containers: %w", err)

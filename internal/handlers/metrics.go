@@ -20,13 +20,18 @@ import (
 // The handler supports both cluster-wide and targeted metrics retrieval with
 // client-side pagination for consistent ordering and performance.
 type MetricsHandler struct {
-	client *kubernetes.Client
+	client      *kubernetes.Client
+	alwaysStart bool
 }
 
 // NewMetricsHandler creates a new MetricsHandler with the provided Kubernetes client.
-func NewMetricsHandler(client *kubernetes.Client) *MetricsHandler {
+// alwaysStart mirrors the --always-start flag: when true, connectivity and auth errors
+// are intercepted and returned as structured tool errors so the LLM can surface them
+// to the user rather than treating them as retryable failures.
+func NewMetricsHandler(client *kubernetes.Client, alwaysStart bool) *MetricsHandler {
 	return &MetricsHandler{
-		client: client,
+		client:      client,
+		alwaysStart: alwaysStart,
 	}
 }
 
@@ -116,7 +121,7 @@ func (h *MetricsHandler) GetNodeMetrics(ctx context.Context, request mcp.CallToo
 	// Use the appropriate client based on context
 	client, err := h.client.ForContext(params.Context)
 	if err != nil {
-		if connectivity.IsTransportError(err) {
+		if h.alwaysStart && connectivity.IsTransportError(err) {
 			return response.Error(connectivity.ErrorMessage(err))
 		}
 		return response.Errorf("failed to create client with context %q: %s", params.Context, err)
@@ -132,7 +137,7 @@ func (h *MetricsHandler) GetNodeMetrics(ctx context.Context, request mcp.CallToo
 		// Get specific node metrics
 		nodeMetrics, err := client.GetNodeMetricsByName(ctx, params.NodeName)
 		if err != nil {
-			if connectivity.IsTransportError(err) {
+			if h.alwaysStart && connectivity.IsTransportError(err) {
 				return response.Error(connectivity.ErrorMessage(err))
 			}
 			if isMetricsServerError(err) {
@@ -153,7 +158,7 @@ func (h *MetricsHandler) GetNodeMetrics(ctx context.Context, request mcp.CallToo
 	// Always fetch all node metrics from the server
 	nodeMetricsList, err := client.GetNodeMetrics(ctx)
 	if err != nil {
-		if connectivity.IsTransportError(err) {
+		if h.alwaysStart && connectivity.IsTransportError(err) {
 			return response.Error(connectivity.ErrorMessage(err))
 		}
 		if isMetricsServerError(err) {
@@ -276,7 +281,7 @@ func (h *MetricsHandler) GetPodMetrics(ctx context.Context, request mcp.CallTool
 	// Use the appropriate client based on context
 	client, err := h.client.ForContext(params.Context)
 	if err != nil {
-		if connectivity.IsTransportError(err) {
+		if h.alwaysStart && connectivity.IsTransportError(err) {
 			return response.Error(connectivity.ErrorMessage(err))
 		}
 		return response.Errorf("failed to create client with context %s: %v", params.Context, err)
@@ -296,7 +301,7 @@ func (h *MetricsHandler) GetPodMetrics(ctx context.Context, request mcp.CallTool
 
 		podMetrics, err := client.GetPodMetricsByName(ctx, params.Namespace, params.PodName)
 		if err != nil {
-			if connectivity.IsTransportError(err) {
+			if h.alwaysStart && connectivity.IsTransportError(err) {
 				return response.Error(connectivity.ErrorMessage(err))
 			}
 			if isMetricsServerError(err) {
@@ -327,7 +332,7 @@ func (h *MetricsHandler) GetPodMetrics(ctx context.Context, request mcp.CallTool
 	}
 
 	if err != nil {
-		if connectivity.IsTransportError(err) {
+		if h.alwaysStart && connectivity.IsTransportError(err) {
 			return response.Error(connectivity.ErrorMessage(err))
 		}
 		if isMetricsServerError(err) {
