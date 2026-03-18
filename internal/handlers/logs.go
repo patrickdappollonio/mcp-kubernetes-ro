@@ -76,10 +76,10 @@ func (h *LogHandler) GetLogs(ctx context.Context, request mcp.CallToolRequest) (
 	// Use the appropriate client based on context
 	client, err := h.client.ForContext(params.Context)
 	if err != nil {
-		if connectivity.IsError(err) {
+		if connectivity.IsTransportError(err) {
 			return response.Error(connectivity.ErrorMessage(err))
 		}
-		return nil, fmt.Errorf("failed to create client with context %s: %w", params.Context, err)
+		return response.Errorf("failed to create client with context %s: %v", params.Context, err)
 	}
 
 	// Set max lines
@@ -134,7 +134,7 @@ func (h *LogHandler) GetLogs(ctx context.Context, request mcp.CallToolRequest) (
 	// Get logs
 	logs, err := client.GetPodLogsWithOptions(ctx, params.Namespace, params.Name, logOpts)
 	if err != nil {
-		if connectivity.IsError(err) {
+		if connectivity.IsTransportError(err) {
 			return response.Error(connectivity.ErrorMessage(err))
 		}
 		return nil, fmt.Errorf("failed to get pod logs: %w", err)
@@ -198,7 +198,7 @@ func (h *LogHandler) GetPodContainers(ctx context.Context, request mcp.CallToolR
 	// Use the appropriate client based on context
 	client, err := h.client.ForContext(params.Context)
 	if err != nil {
-		if connectivity.IsError(err) {
+		if connectivity.IsTransportError(err) {
 			return response.Error(connectivity.ErrorMessage(err))
 		}
 		return nil, fmt.Errorf("failed to create client with context %s: %w", params.Context, err)
@@ -206,7 +206,7 @@ func (h *LogHandler) GetPodContainers(ctx context.Context, request mcp.CallToolR
 
 	containers, err := client.GetPodContainers(ctx, params.Namespace, params.Name)
 	if err != nil {
-		if connectivity.IsError(err) {
+		if connectivity.IsTransportError(err) {
 			return response.Error(connectivity.ErrorMessage(err))
 		}
 		return nil, fmt.Errorf("failed to get pod containers: %w", err)

@@ -116,7 +116,7 @@ func (h *MetricsHandler) GetNodeMetrics(ctx context.Context, request mcp.CallToo
 	// Use the appropriate client based on context
 	client, err := h.client.ForContext(params.Context)
 	if err != nil {
-		if connectivity.IsError(err) {
+		if connectivity.IsTransportError(err) {
 			return response.Error(connectivity.ErrorMessage(err))
 		}
 		return response.Errorf("failed to create client with context %q: %s", params.Context, err)
@@ -132,7 +132,7 @@ func (h *MetricsHandler) GetNodeMetrics(ctx context.Context, request mcp.CallToo
 		// Get specific node metrics
 		nodeMetrics, err := client.GetNodeMetricsByName(ctx, params.NodeName)
 		if err != nil {
-			if connectivity.IsError(err) {
+			if connectivity.IsTransportError(err) {
 				return response.Error(connectivity.ErrorMessage(err))
 			}
 			if isMetricsServerError(err) {
@@ -153,7 +153,7 @@ func (h *MetricsHandler) GetNodeMetrics(ctx context.Context, request mcp.CallToo
 	// Always fetch all node metrics from the server
 	nodeMetricsList, err := client.GetNodeMetrics(ctx)
 	if err != nil {
-		if connectivity.IsError(err) {
+		if connectivity.IsTransportError(err) {
 			return response.Error(connectivity.ErrorMessage(err))
 		}
 		if isMetricsServerError(err) {
@@ -276,7 +276,7 @@ func (h *MetricsHandler) GetPodMetrics(ctx context.Context, request mcp.CallTool
 	// Use the appropriate client based on context
 	client, err := h.client.ForContext(params.Context)
 	if err != nil {
-		if connectivity.IsError(err) {
+		if connectivity.IsTransportError(err) {
 			return response.Error(connectivity.ErrorMessage(err))
 		}
 		return response.Errorf("failed to create client with context %s: %v", params.Context, err)
@@ -296,7 +296,7 @@ func (h *MetricsHandler) GetPodMetrics(ctx context.Context, request mcp.CallTool
 
 		podMetrics, err := client.GetPodMetricsByName(ctx, params.Namespace, params.PodName)
 		if err != nil {
-			if connectivity.IsError(err) {
+			if connectivity.IsTransportError(err) {
 				return response.Error(connectivity.ErrorMessage(err))
 			}
 			if isMetricsServerError(err) {
@@ -327,7 +327,7 @@ func (h *MetricsHandler) GetPodMetrics(ctx context.Context, request mcp.CallTool
 	}
 
 	if err != nil {
-		if connectivity.IsError(err) {
+		if connectivity.IsTransportError(err) {
 			return response.Error(connectivity.ErrorMessage(err))
 		}
 		if isMetricsServerError(err) {

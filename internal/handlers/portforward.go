@@ -72,7 +72,7 @@ func (h *PortForwardHandler) StartPortForward(ctx context.Context, request mcp.C
 	// Use the appropriate client based on context
 	client, err := h.client.ForContext(params.Context)
 	if err != nil {
-		if connectivity.IsError(err) {
+		if connectivity.IsTransportError(err) {
 			return response.Error(connectivity.ErrorMessage(err))
 		}
 		return nil, fmt.Errorf("failed to create client with context %s: %w", params.Context, err)
@@ -88,7 +88,7 @@ func (h *PortForwardHandler) StartPortForward(ctx context.Context, request mcp.C
 		params.Context,
 	)
 	if err != nil {
-		if connectivity.IsError(err) {
+		if connectivity.IsTransportError(err) {
 			return response.Error(connectivity.ErrorMessage(err))
 		}
 		return nil, fmt.Errorf("failed to start port forward: %w", err)
