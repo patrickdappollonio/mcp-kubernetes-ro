@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/patrickdappollonio/mcp-kubernetes-ro/internal/connectivity"
 	"github.com/patrickdappollonio/mcp-kubernetes-ro/internal/kubernetes"
 	"github.com/patrickdappollonio/mcp-kubernetes-ro/internal/portforward"
 	"github.com/patrickdappollonio/mcp-kubernetes-ro/internal/response"
@@ -14,15 +15,20 @@ import (
 // PortForwardHandler provides MCP tools for managing port-forwarding sessions to Kubernetes pods.
 // It supports starting, stopping, and listing active port forwards with multiple port mappings per session.
 type PortForwardHandler struct {
-	client  *kubernetes.Client
-	manager *portforward.Manager
+	client      *kubernetes.Client
+	manager     *portforward.Manager
+	alwaysStart bool
 }
 
 // NewPortForwardHandler creates a new PortForwardHandler with the provided Kubernetes client and port-forward manager.
-func NewPortForwardHandler(client *kubernetes.Client, manager *portforward.Manager) *PortForwardHandler {
+// alwaysStart mirrors the --always-start flag: when true, connectivity and auth errors
+// are intercepted and returned as structured tool errors so the LLM can surface them
+// to the user rather than treating them as retryable failures.
+func NewPortForwardHandler(client *kubernetes.Client, manager *portforward.Manager, alwaysStart bool) *PortForwardHandler {
 	return &PortForwardHandler{
-		client:  client,
-		manager: manager,
+		client:      client,
+		manager:     manager,
+		alwaysStart: alwaysStart,
 	}
 }
 
@@ -71,6 +77,9 @@ func (h *PortForwardHandler) StartPortForward(ctx context.Context, request mcp.C
 	// Use the appropriate client based on context
 	client, err := h.client.ForContext(params.Context)
 	if err != nil {
+		if h.alwaysStart && connectivity.IsTransportError(err) {
+			return response.Error(connectivity.ErrorMessage(err))
+		}
 		return nil, fmt.Errorf("failed to create client with context %s: %w", params.Context, err)
 	}
 
@@ -84,6 +93,9 @@ func (h *PortForwardHandler) StartPortForward(ctx context.Context, request mcp.C
 		params.Context,
 	)
 	if err != nil {
+		if h.alwaysStart && connectivity.IsTransportError(err) {
+			return response.Error(connectivity.ErrorMessage(err))
+		}
 		return nil, fmt.Errorf("failed to start port forward: %w", err)
 	}
 
