@@ -68,9 +68,6 @@ func (h *LogHandler) GetLogs(ctx context.Context, request mcp.CallToolRequest) (
 
 		// Previous retrieves logs from the previous terminated container instance.
 		Previous bool `json:"previous"`
-
-		// PlainText returns logs as plain text (like kubectl logs) instead of a JSON envelope.
-		PlainText bool `json:"plain_text"`
 	}
 
 	if err := request.BindArguments(&params); err != nil {
@@ -154,34 +151,7 @@ func (h *LogHandler) GetLogs(ctx context.Context, request mcp.CallToolRequest) (
 		return nil, fmt.Errorf("failed to filter logs: %w", err)
 	}
 
-	// Count matching lines for metadata
-	matchingLines, err := logfilter.CountMatchingLines(logs, filterOpts)
-	if err != nil {
-		return nil, fmt.Errorf("failed to count matching lines: %w", err)
-	}
-
-	if params.PlainText {
-		return mcp.NewToolResultText(filteredLogs), nil
-	}
-
-	responseData := map[string]interface{}{
-		"namespace": params.Namespace,
-		"pod":       params.Name,
-		"container": params.Container,
-		"logs":      filteredLogs,
-		"metadata": map[string]interface{}{
-			"total_lines":    len(strings.Split(logs, "\n")),
-			"matching_lines": matchingLines,
-			"filtered":       len(grepInclude) > 0 || len(grepExclude) > 0,
-			"since":          params.Since,
-			"previous":       params.Previous,
-			"use_regex":      params.UseRegex,
-			"grep_include":   grepInclude,
-			"grep_exclude":   grepExclude,
-		},
-	}
-
-	return response.JSON(responseData)
+	return mcp.NewToolResultText(filteredLogs), nil
 }
 
 // GetPodContainers implements the get_pod_containers MCP tool.
@@ -268,9 +238,6 @@ func (h *LogHandler) GetTools() []MCPTool {
 				),
 				mcp.WithBoolean("previous",
 					mcp.Description("Return logs from the previous terminated container instance (like kubectl logs --previous)"),
-				),
-				mcp.WithBoolean("plain_text",
-					mcp.Description("Return logs as plain text (like kubectl logs) instead of a JSON envelope. Useful when you need to search or process log lines directly."),
 				),
 			),
 			h.GetLogs,
