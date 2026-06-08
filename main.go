@@ -44,8 +44,8 @@ func (s *stringSlice) Set(value string) error {
 var (
 	kubeconfig           = flag.String("kubeconfig", "", "Path to kubeconfig file")
 	namespace            = flag.String("namespace", "", "Default namespace")
-	transport            = flag.String("transport", "stdio", "Transport type: stdio or sse")
-	port                 = flag.Int("port", 8080, "Port for SSE server (only used with -transport=sse)")
+	transport            = flag.String("transport", "stdio", "Transport type: stdio, sse, or streamable-http")
+	port                 = flag.Int("port", 8080, "Port for HTTP-based transports (only used with -transport=sse or -transport=streamable-http)")
 	disabledTools        stringSlice
 	disabledResources    stringSlice
 	enablePortForwarding = flag.Bool("enable-port-forwarding", false, "Enable port forwarding tools (start_port_forward, stop_port_forward, list_port_forwards)")
@@ -157,8 +157,11 @@ func main() {
 		pfManager = portforward.NewManager()
 		fmt.Fprintln(os.Stderr, "Port forwarding tools enabled")
 
-		if *transport == "sse" {
+		switch *transport {
+		case "sse":
 			fmt.Fprintln(os.Stderr, "WARNING: Port forwarding with SSE mode — forwarded ports bind to this server's local interface, not the client's machine. Remote clients will need to expose or tunnel those ports to access forwarded services.")
+		case "streamable-http":
+			fmt.Fprintln(os.Stderr, "WARNING: Port forwarding with streamable-http mode — forwarded ports bind to this server's local interface, not the client's machine. Additionally, port-forward session state is held per-process, so do NOT run multiple replicas behind a load balancer with port forwarding enabled; sessions started on one replica will not be visible to others.")
 		}
 	}
 
@@ -262,7 +265,31 @@ func main() {
 		if err := httpServer.ListenAndServe(); err != nil {
 			fmt.Printf("SSE server error: %v\n", err)
 		}
+	case "streamable-http":
+		// Stateless mode lets any request be served by any replica, so the
+		// server can sit behind a round-robin load balancer with no sticky
+		// routing or shared session store.
+		httpHandler := server.NewStreamableHTTPServer(s,
+			server.WithStateLess(true),
+			server.WithEndpointPath("/mcp"),
+		)
+
+		addr := ":" + strconv.Itoa(*port)
+		log.Printf("Starting streamable-http MCP server on %s", addr)
+		log.Printf("MCP endpoint: http://localhost%s/mcp", addr)
+
+		httpServer := &http.Server{
+			Addr:         addr,
+			Handler:      httpHandler,
+			ReadTimeout:  15 * time.Second,
+			WriteTimeout: 15 * time.Second,
+			IdleTimeout:  60 * time.Second,
+		}
+
+		if err := httpServer.ListenAndServe(); err != nil {
+			fmt.Printf("streamable-http server error: %v\n", err)
+		}
 	default:
-		log.Fatalf("Unknown transport type: %s. Supported: stdio, sse", *transport)
+		log.Fatalf("Unknown transport type: %s. Supported: stdio, sse, streamable-http", *transport)
 	}
 }
