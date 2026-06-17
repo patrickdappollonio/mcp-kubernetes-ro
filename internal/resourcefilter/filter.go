@@ -1,6 +1,7 @@
 package resourcefilter
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -74,7 +75,7 @@ func NewLazyFilter(value string, resolver ResourceResolver) (*Filter, error) {
 	}
 
 	if resolver == nil {
-		return nil, fmt.Errorf("cannot create lazy resource filter: no resource resolver provided")
+		return nil, errors.New("cannot create lazy resource filter: no resource resolver provided")
 	}
 
 	// Validate token syntax eagerly (no API call needed) so malformed input
