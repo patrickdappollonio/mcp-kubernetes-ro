@@ -15,7 +15,7 @@ The server leverages your local `kubectl` configuration (even when `kubectl` is 
 - **Container Discovery**: List containers within pods for targeted log access
 - **API Discovery**: Discover available Kubernetes API resources and their capabilities
 - **Base64 Utilities**: Encode and decode base64 data for Kubernetes secrets and configurations
-- **Multiple Transport Modes**: Support for both stdio and Server-Sent Events (SSE) communication
+- **Multiple Transport Modes**: Support for stdio, Server-Sent Events (SSE), and stateless Streamable HTTP communication
 - **Read-Only Security**: Complete prevention of destructive operations while maintaining full inspection capabilities
 - **Resource Access Control**: Disable access to specific Kubernetes resource types (e.g., Secrets) to prevent AI agents from querying sensitive data
 - **Namespace Support**: Work with specific namespaces or cluster-wide resources
@@ -275,6 +275,18 @@ mcp-kubernetes-ro --transport=sse --port=8080
 
 In SSE mode, the server will listen on the specified port (default: 8080) and provide the same MCP tools over HTTP using Server-Sent Events. This is useful for web applications or environments where stdio communication isn't practical.
 
+### Streamable HTTP Mode
+
+For deployments that need to scale horizontally behind a load balancer, run the server with the Streamable HTTP transport:
+
+```bash
+mcp-kubernetes-ro --transport=streamable-http --port=8080
+```
+
+In this mode the server exposes a single MCP endpoint at `/mcp` and operates statelessly at the protocol layer — no `Mcp-Session-Id` is required and any request can be served by any replica. This means you can put multiple instances behind an ordinary round-robin load balancer without sticky sessions or a shared session store.
+
+> **Note on port forwarding:** Port-forward sessions are held in-process and cannot be shared between replicas. If you enable `--enable-port-forwarding` together with `--transport=streamable-http`, run a single replica only — otherwise sessions started on one replica will not be visible to others.
+
 ## Configuration Options
 
 The following command-line flags are available to configure the MCP server:
@@ -284,8 +296,8 @@ The following command-line flags are available to configure the MCP server:
 - `--namespace=NAME`: Default namespace for operations (defaults to current namespace)
 
 ### Transport Options
-- `--transport=TYPE`: Transport type: `stdio` or `sse` (default: `stdio`)
-- `--port=PORT`: Port for SSE server (default: 8080, only used with `--transport=sse`)
+- `--transport=TYPE`: Transport type: `stdio`, `sse`, or `streamable-http` (default: `stdio`)
+- `--port=PORT`: Port for HTTP-based transports (default: 8080, only used with `--transport=sse` or `--transport=streamable-http`)
 
 ### Tool and Resource Management
 - `--disabled-tools=NAMES`: Tool names to disable, repeatable and comma-separated (optional)
@@ -651,7 +663,7 @@ Enable it with the `--enable-port-forwarding` flag or by setting the `MCP_KUBERN
 > Port forwarding can target **any pod** in the cluster that your kubeconfig credentials have access to, including infrastructure pods. If the Kubernetes API server itself is running as a pod (e.g., in self-hosted or certain managed setups), an AI agent could theoretically forward to it. While port forwarding alone **does not grant additional privileges** — you still need valid credentials and RBAC permissions to authenticate against the API server — exposing the API server on a local port could lead to unintended interactions if other local tools or scripts discover it. Always review your RBAC policies and consider using `--disabled-resources` alongside port forwarding to limit what the AI agent can discover and target.
 
 > [!WARNING]
-> When running in **SSE mode** (`--transport=sse`) on a remote server, forwarded ports bind to the **server's local interface**, not your workstation. This means `localhost:<local_port>` refers to the machine where `mcp-kubernetes-ro` is running. To access forwarded services from your workstation, you must expose those ports — for example, via SSH tunneling (`ssh -L <local_port>:localhost:<local_port> user@remote-host`) or other network configuration. In stdio mode this is not an issue, as the server runs locally alongside your editor.
+> When running in **SSE mode** (`--transport=sse`) or **Streamable HTTP mode** (`--transport=streamable-http`) on a remote server, forwarded ports bind to the **server's local interface**, not your workstation. This means `localhost:<local_port>` refers to the machine where `mcp-kubernetes-ro` is running. To access forwarded services from your workstation, you must expose those ports — for example, via SSH tunneling (`ssh -L <local_port>:localhost:<local_port> user@remote-host`) or other network configuration. In stdio mode this is not an issue, as the server runs locally alongside your editor. With Streamable HTTP, additionally run only a single replica when port forwarding is enabled — session state is in-process and is not shared across replicas.
 
 When enabled, three additional tools become available:
 
@@ -960,7 +972,7 @@ Resource filters configured via `--disabled-resources` are similarly deferred: n
 - **Local Authentication**: Uses your existing kubectl configuration and credentials
 - **No Destructive Operations**: Cannot create, update, or delete resources
 - **Namespace Isolation**: Respects RBAC permissions from your kubeconfig
-- **Secure Communication**: Supports both stdio and HTTPS-based SSE communication
+- **Secure Communication**: Supports stdio, SSE, and Streamable HTTP transports (the latter two can be served over HTTPS via a reverse proxy)
 
 ## Metrics Implementation Details
 
