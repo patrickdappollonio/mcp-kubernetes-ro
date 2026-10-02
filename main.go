@@ -183,7 +183,7 @@ func main() {
 	// Build server instructions
 	instructions := "This MCP server provides read-only access to Kubernetes clusters. It can list resources, get resource details, retrieve pod logs, discover API resources, get node and pod metrics, and perform base64 encoding/decoding operations.\n\n" +
 		"IMPORTANT LIMITATIONS AND GUIDELINES:\n" +
-		"• This is a READ-ONLY server - it cannot perform any destructive or write operations\n" +
+		"• This is a READ-ONLY server - it cannot perform any destructive or write operations against the cluster\n" +
 		"• DO NOT execute commands that modify cluster state through shell commands or kubectl\n" +
 		"• Always ask for explicit user permission before suggesting any write operations\n" +
 		"• When suggesting write operations, provide kubectl commands as examples rather than executing them\n" +

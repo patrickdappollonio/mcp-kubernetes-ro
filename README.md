@@ -163,7 +163,7 @@ Do note that you'll need to mount your kubeconfig file into the container, and e
 
 ## Available MCP Tools
 
-There are **11 tools** available by default, plus **3 additional tools** when port forwarding is enabled. Which secret tool is available depends on the transport (see [Secret Values](#secret-values)):
+There are **11 tools** available by default, plus **3 additional tools** when port forwarding is enabled. Which secret tool is available depends on the transport, and `--insecure-secret-access` removes it, leaving 10 (see [Secret Values](#secret-values)):
 
 - **`list_resources`**: List any Kubernetes resources by type with optional filtering, sorted newest first. `metadata.managedFields` is omitted by default unless `include_managed_fields=true`
 - **`get_resource`**: Get specific resource details. `metadata.managedFields` is omitted by default unless `include_managed_fields=true`. Secret values are hidden
@@ -264,7 +264,7 @@ If a resource name cannot be resolved against the cluster (e.g., a typo or a CRD
 
 Tool output stays in the conversation history and in your AI client's logs. A Secret's values are only base64-encoded, which is an encoding and not encryption, so returning them from a tool would leave them readable in plain text.
 
-By default, `get_resource` hides every Secret value and shows only its size, such as `"password": "[redacted: 16 bytes]"`. It also removes the `kubectl.kubernetes.io/last-applied-configuration` annotation, which holds a full copy of the Secret when it was created with `kubectl apply`. `list_resources` removes that annotation too.
+By default, `get_resource` hides every Secret value and shows only its size, such as `"password": "[redacted: 16 bytes]"`. It also removes the `kubectl.kubernetes.io/last-applied-configuration` annotation, which holds a full copy of the Secret when it was created with `kubectl apply`. `list_resources` removes that annotation too when it returns metadata (`title_only=false`).
 
 When an agent needs a value, for example to use it in a script, it retrieves it with the secret tool for the transport in use. The server instructions explain the steps to the agent.
 
@@ -285,18 +285,18 @@ The path must be absolute. The file is created with owner-only permissions (`060
 
 ### SSE and Streamable HTTP: `get_secret_encrypted`
 
-A remote server cannot write to your disk, so the value is encrypted to a key that only your machine holds. The agent runs these steps with the `openssl` that ships with macOS and Linux, so nothing needs installing:
+A remote server cannot write to your disk, so the value is encrypted to a key that only your machine holds. The agent runs these steps with the `openssl` that ships with macOS and most Linux distributions, so usually nothing needs installing:
 
 1. Create a one-time key pair: `(umask 077; openssl genrsa -out /tmp/k8s-secret-key.pem 4096)`
 2. Print its public key: `openssl rsa -in /tmp/k8s-secret-key.pem -pubout`
 3. Call `get_secret_encrypted` with the public key, the private key path and the output path. The server encrypts the value with RSA-OAEP and returns a `decrypt_command`. Values larger than one RSA block are split into several blocks.
-4. Run `decrypt_command`. It writes the value to the output path with owner-only permissions, refuses to overwrite an existing file, and deletes the private key afterwards.
+4. Run `decrypt_command`. It writes the value to the output path with owner-only permissions, refuses to overwrite an existing file, and deletes the private key once decryption succeeds.
 
 The conversation only ever holds the public key and the encrypted blocks. Neither can recover the value without the private key, which never leaves your machine and is deleted after use. The server keeps no state, so this works with multiple stateless replicas.
 
 ### What this protects against
 
-These tools keep Secret values out of the conversation history and client logs. They do not stop an agent with shell access from reading the file afterwards, for example with `cat`. The server instructions tell the agent not to, but that is guidance, not enforcement. To stop an agent from reaching Secrets at all, use `--disabled-resources=secrets`, which also disables both secret tools.
+These tools keep Secret values out of the conversation history and client logs. They do not stop an agent with shell access from reading the file afterwards, for example with `cat`. The server instructions tell the agent not to, but that is guidance, not enforcement. To stop an agent from reaching Secrets at all, use `--disabled-resources=secrets`, which also makes the secret tools refuse every request.
 
 ### Restoring the old behavior: `--insecure-secret-access`
 
@@ -1018,7 +1018,7 @@ Resource filters configured via `--disabled-resources` are similarly deferred: n
 
 ## Security Considerations
 
-- **Read-Only Access**: The server only supports read operations (`get`, `list`, `watch`)
+- **Read-Only Access**: The server only supports read operations (`get`, `list`, `watch`) against the cluster. The one write it makes is `save_secret_to_file` creating a new local file in stdio mode
 - **Resource Access Control**: Block AI agents from querying specific resource types (e.g., Secrets) using `--disabled-resources`
 - **Secret Values Hidden by Default**: Secret values never appear in tool output unless `--insecure-secret-access` is set. See [Secret Values](#secret-values)
 - **Local Authentication**: Uses your existing kubectl configuration and credentials
