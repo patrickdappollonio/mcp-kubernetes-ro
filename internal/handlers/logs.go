@@ -151,30 +151,7 @@ func (h *LogHandler) GetLogs(ctx context.Context, request mcp.CallToolRequest) (
 		return nil, fmt.Errorf("failed to filter logs: %w", err)
 	}
 
-	// Count matching lines for metadata
-	matchingLines, err := logfilter.CountMatchingLines(logs, filterOpts)
-	if err != nil {
-		return nil, fmt.Errorf("failed to count matching lines: %w", err)
-	}
-
-	responseData := map[string]interface{}{
-		"namespace": params.Namespace,
-		"pod":       params.Name,
-		"container": params.Container,
-		"logs":      filteredLogs,
-		"metadata": map[string]interface{}{
-			"total_lines":    len(strings.Split(logs, "\n")),
-			"matching_lines": matchingLines,
-			"filtered":       len(grepInclude) > 0 || len(grepExclude) > 0,
-			"since":          params.Since,
-			"previous":       params.Previous,
-			"use_regex":      params.UseRegex,
-			"grep_include":   grepInclude,
-			"grep_exclude":   grepExclude,
-		},
-	}
-
-	return response.JSON(responseData)
+	return mcp.NewToolResultText(filteredLogs), nil
 }
 
 // GetPodContainers implements the get_pod_containers MCP tool.
