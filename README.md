@@ -132,27 +132,22 @@ And this is how to leverage the Docker image instead:
         "--rm",
         "-e", "KUBECONFIG=/root/.kube/config",
         "-v", "/path/to/kubeconfig:/root/.kube/config",
+        // Environment variables must be passed with -e, before the image name:
+        // "-e", "MCP_KUBERNETES_RO_DISABLED_TOOLS=get_logs,decode_base64",
+        // "-e", "MCP_KUBERNETES_RO_DISABLED_RESOURCES=secrets,configmaps",
         "ghcr.io/patrickdappollonio/mcp-kubernetes-ro"
         // Place additional flags here, like:
         // "--disabled-tools=get_logs,decode_base64",
         // "--disabled-resources=secrets"
-      ],
-      "env": {
-        // Set KUBECONFIG environment variable if needed:
-        // "KUBECONFIG": "/path/to/kubeconfig",
-        // Set MCP_KUBERNETES_RO_DISABLED_TOOLS environment variable if needed:
-        // "MCP_KUBERNETES_RO_DISABLED_TOOLS": "get_logs,decode_base64",
-        // Or use generic DISABLED_TOOLS environment variable:
-        // "DISABLED_TOOLS": "get_logs,decode_base64",
-        // Disable access to specific resource types:
-        // "MCP_KUBERNETES_RO_DISABLED_RESOURCES": "secrets,configmaps"
-      }
+      ]
     },
   }
 }
 ```
 
-Do note that you'll need to mount your kubeconfig file into the container, and either set the `KUBECONFIG` environment variable to the path of the mounted file, or use the `--kubeconfig` flag to set it.
+Do note that you'll need to mount your kubeconfig file into the container, and either set the `KUBECONFIG` environment variable to the path of the mounted file, or use the `--kubeconfig` flag to set it. An `"env"` block in this configuration only applies to the `docker` command itself, not to the server inside the container, so pass environment variables with `-e` in `args` as shown above.
+
+The container cannot write files to your disk, so the image turns on `--encrypted-secret-access` by default: Secret values are retrieved with `get_secret_encrypted` instead of `save_secret_to_file`, even over stdio. See [Secret Values](#secret-values).
 
 ### Prerequisites
 
@@ -176,7 +171,7 @@ There are **11 tools** available by default, plus **3 additional tools** when po
 - **`encode_base64`**: Encode text data to base64 format
 - **`decode_base64`**: Decode base64 data to text format
 - **`save_secret_to_file`** *(stdio only)*: Write one Secret value to an owner-only file, in a private temp folder by default, without returning it
-- **`get_secret_encrypted`** *(SSE and Streamable HTTP only)*: Return one Secret value encrypted to a public key you provide, plus the command that decrypts it on your machine
+- **`get_secret_encrypted`** *(SSE, Streamable HTTP, or `--encrypted-secret-access`)*: Return one Secret value encrypted to a public key you provide, plus the command that decrypts it on your machine
 - **`start_port_forward`** *(opt-in)*: Start port forwarding to a pod with one or more port mappings
 - **`stop_port_forward`** *(opt-in)*: Stop an active port-forwarding session by ID
 - **`list_port_forwards`** *(opt-in)*: List all active port-forwarding sessions
@@ -215,7 +210,7 @@ When a tool is disabled, it will not be registered with the MCP server and will 
 - `encode_base64`
 - `decode_base64`
 - `save_secret_to_file` *(only with stdio)*
-- `get_secret_encrypted` *(only with SSE or Streamable HTTP)*
+- `get_secret_encrypted` *(only with SSE, Streamable HTTP, or `--encrypted-secret-access`)*
 - `start_port_forward` *(only when port forwarding is enabled)*
 - `stop_port_forward` *(only when port forwarding is enabled)*
 - `list_port_forwards` *(only when port forwarding is enabled)*
@@ -284,9 +279,9 @@ By default, the file goes in a new folder in the system temp directory, for exam
 
 The agent passes the file to a script, for example `DB_PASSWORD="$(cat /tmp/mcp-kubernetes-ro-secret-1234567/password)" ./migrate.sh`, and is told to delete the file when the script no longer needs it. The server does not delete it for you.
 
-### SSE and Streamable HTTP: `get_secret_encrypted`
+### SSE, Streamable HTTP and Docker: `get_secret_encrypted`
 
-A remote server cannot write to your disk, so the value is encrypted to a key that only your machine holds. The agent runs these steps with the `openssl` that ships with macOS and most Linux distributions, so usually nothing needs installing:
+A remote server, or one running in a container, cannot write to your disk, so the value is encrypted to a key that only your machine holds. This tool replaces `save_secret_to_file` with the SSE and Streamable HTTP transports, and with stdio when `--encrypted-secret-access` is set. The Docker image sets it by default. The agent runs these steps with the `openssl` that ships with macOS and most Linux distributions, so usually nothing needs installing:
 
 1. Create a one-time key pair: `(umask 077; openssl genrsa -out /tmp/k8s-secret-key.pem 4096)`
 2. Print its public key: `openssl rsa -in /tmp/k8s-secret-key.pem -pubout`
@@ -354,7 +349,9 @@ The following command-line flags are available to configure the MCP server:
 - `MCP_KUBERNETES_RO_DISABLED_RESOURCES`: Environment variable for disabled resources (merged with flag values)
 
 ### Secret Access
-- `--insecure-secret-access`: Return Secret values from `get_resource` as stored and disable the secret tools (disabled by default, not recommended; see [Secret Values](#secret-values))
+- `--encrypted-secret-access`: Offer `get_secret_encrypted` instead of `save_secret_to_file` even with stdio, for when the server cannot write to your disk. On by default in the Docker image
+- `MCP_KUBERNETES_RO_ENCRYPTED_SECRET_ACCESS`: Environment variable for the same setting (set to `true`, `1`, or `yes`)
+- `--insecure-secret-access`: Return Secret values from `get_resource` as stored and disable the secret tools; overrides `--encrypted-secret-access` (disabled by default, not recommended; see [Secret Values](#secret-values))
 - `MCP_KUBERNETES_RO_INSECURE_SECRET_ACCESS`: Environment variable for the same setting (set to `true`, `1`, or `yes`)
 
 ### Port Forwarding

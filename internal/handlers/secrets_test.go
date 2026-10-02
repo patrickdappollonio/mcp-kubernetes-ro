@@ -74,18 +74,22 @@ func TestSecretAccessModeFor(t *testing.T) {
 	tests := []struct {
 		transport string
 		insecure  bool
+		encrypted bool
 		want      SecretAccessMode
 	}{
-		{"stdio", false, SecretAccessFile},
-		{"sse", false, SecretAccessEncrypted},
-		{"streamable-http", false, SecretAccessEncrypted},
-		{"stdio", true, SecretAccessInsecure},
-		{"streamable-http", true, SecretAccessInsecure},
+		{"stdio", false, false, SecretAccessFile},
+		{"sse", false, false, SecretAccessEncrypted},
+		{"streamable-http", false, false, SecretAccessEncrypted},
+		{"stdio", false, true, SecretAccessEncrypted},
+		{"streamable-http", false, true, SecretAccessEncrypted},
+		{"stdio", true, false, SecretAccessInsecure},
+		{"streamable-http", true, false, SecretAccessInsecure},
+		{"stdio", true, true, SecretAccessInsecure},
 	}
 
 	for _, tt := range tests {
-		if got := SecretAccessModeFor(tt.transport, tt.insecure); got != tt.want {
-			t.Errorf("SecretAccessModeFor(%q, %v) = %v, want %v", tt.transport, tt.insecure, got, tt.want)
+		if got := SecretAccessModeFor(tt.transport, tt.insecure, tt.encrypted); got != tt.want {
+			t.Errorf("SecretAccessModeFor(%q, insecure=%v, encrypted=%v) = %v, want %v", tt.transport, tt.insecure, tt.encrypted, got, tt.want)
 		}
 	}
 }

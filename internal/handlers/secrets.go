@@ -27,7 +27,7 @@ const (
 	SecretAccessFile SecretAccessMode = iota
 
 	// SecretAccessEncrypted hides Secret values and offers get_secret_encrypted.
-	// Used with remote transports, where the server cannot reach the user's disk.
+	// Used when the server cannot reach the user's disk: remotely or in a container.
 	SecretAccessEncrypted
 
 	// SecretAccessInsecure returns Secret values as-is from get_resource and
@@ -56,12 +56,14 @@ func (m SecretAccessMode) toolName() string {
 	}
 }
 
-// SecretAccessModeFor returns the mode for a transport, or
-// SecretAccessInsecure when insecure access was requested.
-func SecretAccessModeFor(transport string, insecure bool) SecretAccessMode {
+// SecretAccessModeFor returns the mode for a transport. insecure selects
+// SecretAccessInsecure and wins over encrypted, which selects SecretAccessEncrypted.
+func SecretAccessModeFor(transport string, insecure, encrypted bool) SecretAccessMode {
 	switch {
 	case insecure:
 		return SecretAccessInsecure
+	case encrypted:
+		return SecretAccessEncrypted
 	case transport == "stdio":
 		return SecretAccessFile
 	default:
@@ -350,7 +352,7 @@ func SecretAccessInstructions(mode SecretAccessMode) string {
 
 	case SecretAccessEncrypted:
 		return "SECRETS:\n" + why +
-			"• This server is remote and cannot write to the user's machine, so values are delivered encrypted to a key only the user's machine holds.\n" +
+			"• This server cannot write to the user's machine (it runs remotely or in a container), so values are delivered encrypted to a key only the user's machine holds.\n" +
 			"• To retrieve a value, run these steps in a shell on the user's machine using the built-in openssl:\n" +
 			"  1. Create a new one-time key pair: (umask 077; openssl genrsa -out /tmp/k8s-secret-key.pem 4096)\n" +
 			"  2. Print its public key: openssl rsa -in /tmp/k8s-secret-key.pem -pubout\n" +

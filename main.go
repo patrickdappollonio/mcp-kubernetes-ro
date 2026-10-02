@@ -42,16 +42,17 @@ func (s *stringSlice) Set(value string) error {
 }
 
 var (
-	kubeconfig           = flag.String("kubeconfig", "", "Path to kubeconfig file")
-	namespace            = flag.String("namespace", "", "Default namespace")
-	transport            = flag.String("transport", "stdio", "Transport type: stdio, sse, or streamable-http")
-	port                 = flag.Int("port", 8080, "Port for HTTP-based transports (only used with -transport=sse or -transport=streamable-http)")
-	disabledTools        stringSlice
-	disabledResources    stringSlice
-	enablePortForwarding = flag.Bool("enable-port-forwarding", false, "Enable port forwarding tools (start_port_forward, stop_port_forward, list_port_forwards)")
-	insecureSecretAccess = flag.Bool("insecure-secret-access", false, "Return Secret values from get_resource as stored (base64-encoded) and disable the safe secret tools. Not recommended: base64 is not encryption, so every value read ends up readable in the conversation history and client logs. By default values are hidden and retrieved with save_secret_to_file (stdio) or get_secret_encrypted (remote transports).")
-	alwaysStart          = flag.Bool("always-start", false, "Skip the startup connectivity check and start the MCP server immediately. Useful for short-lived or browser-flow OIDC credentials that are not yet valid at process start. Connectivity and authentication errors will be reported as tool call failures instead of preventing startup.")
-	version              = "dev"
+	kubeconfig            = flag.String("kubeconfig", "", "Path to kubeconfig file")
+	namespace             = flag.String("namespace", "", "Default namespace")
+	transport             = flag.String("transport", "stdio", "Transport type: stdio, sse, or streamable-http")
+	port                  = flag.Int("port", 8080, "Port for HTTP-based transports (only used with -transport=sse or -transport=streamable-http)")
+	disabledTools         stringSlice
+	disabledResources     stringSlice
+	enablePortForwarding  = flag.Bool("enable-port-forwarding", false, "Enable port forwarding tools (start_port_forward, stop_port_forward, list_port_forwards)")
+	insecureSecretAccess  = flag.Bool("insecure-secret-access", false, "Return Secret values from get_resource as stored (base64-encoded) and disable the safe secret tools. Not recommended: base64 is not encryption, so every value read ends up readable in the conversation history and client logs. By default values are hidden and retrieved with save_secret_to_file (stdio) or get_secret_encrypted (remote transports).")
+	encryptedSecretAccess = flag.Bool("encrypted-secret-access", false, "Offer get_secret_encrypted instead of save_secret_to_file even with the stdio transport. Use it when the server cannot write to the user's disk, for example inside a container. The Docker image enables it by default.")
+	alwaysStart           = flag.Bool("always-start", false, "Skip the startup connectivity check and start the MCP server immediately. Useful for short-lived or browser-flow OIDC credentials that are not yet valid at process start. Connectivity and authentication errors will be reported as tool call failures instead of preventing startup.")
+	version               = "dev"
 )
 
 func init() {
@@ -104,7 +105,15 @@ func main() {
 		}
 	}
 
-	secretAccessMode := handlers.SecretAccessModeFor(*transport, insecureSecretAccessEnabled)
+	// Resolve encrypted secret access flag from CLI or environment variable
+	encryptedSecretAccessEnabled := *encryptedSecretAccess
+	if !encryptedSecretAccessEnabled {
+		if val := strings.TrimSpace(os.Getenv("MCP_KUBERNETES_RO_ENCRYPTED_SECRET_ACCESS")); val != "" {
+			encryptedSecretAccessEnabled = strings.EqualFold(val, "true") || val == "1" || strings.EqualFold(val, "yes")
+		}
+	}
+
+	secretAccessMode := handlers.SecretAccessModeFor(*transport, insecureSecretAccessEnabled, encryptedSecretAccessEnabled)
 	if secretAccessMode == handlers.SecretAccessInsecure {
 		fmt.Fprintln(os.Stderr, "WARNING: --insecure-secret-access is enabled. get_resource returns Secret values as stored (base64 is not encryption), so any value read stays readable in the conversation history and client logs.")
 	}
