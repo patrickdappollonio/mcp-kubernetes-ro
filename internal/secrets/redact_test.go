@@ -1,6 +1,7 @@
 package secrets
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -98,32 +99,16 @@ func TestRedact(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if got := Redact(tt.in); !reflect.DeepEqual(got, tt.want) {
-				t.Fatalf("Redact() = %#v, want %#v", got, tt.want)
+			before := fmt.Sprintf("%#v", tt.in)
+
+			got := Redact(tt.in)
+
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("Redact() = %#v, want %#v", got, tt.want)
+			}
+			if after := fmt.Sprintf("%#v", tt.in); after != before {
+				t.Errorf("Redact() modified its input: before %s, after %s", before, after)
 			}
 		})
-	}
-}
-
-func TestRedactDoesNotModifyInput(t *testing.T) {
-	t.Parallel()
-
-	in := map[string]any{
-		"data": map[string]any{"password": "czNjcjN0"},
-		"metadata": map[string]any{
-			"annotations": map[string]any{
-				"kubectl.kubernetes.io/last-applied-configuration": "{}",
-			},
-		},
-	}
-
-	Redact(in)
-
-	if got := in["data"].(map[string]any)["password"]; got != "czNjcjN0" {
-		t.Fatalf("input data was modified: %v", got)
-	}
-	annotations := in["metadata"].(map[string]any)["annotations"].(map[string]any)
-	if _, ok := annotations["kubectl.kubernetes.io/last-applied-configuration"]; !ok {
-		t.Fatal("input annotations were modified")
 	}
 }

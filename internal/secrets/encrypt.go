@@ -32,7 +32,7 @@ func Encrypt(publicKeyPEM string, plaintext []byte) ([]string, error) {
 		n := min(maxChunk, len(plaintext))
 		ct, err := rsa.EncryptOAEP(sha1.New(), rand.Reader, pub, plaintext[:n], nil)
 		if err != nil {
-			return nil, fmt.Errorf("encrypting value: %w", err)
+			return nil, fmt.Errorf("failed to encrypt value: %w", err)
 		}
 		blocks = append(blocks, base64.StdEncoding.EncodeToString(ct))
 
@@ -57,10 +57,10 @@ func parsePublicKey(publicKeyPEM string) (*rsa.PublicKey, error) {
 	case "RSA PUBLIC KEY":
 		parsed, err = x509.ParsePKCS1PublicKey(block.Bytes)
 	default:
-		return nil, fmt.Errorf("expected a public key PEM block, got %q: never send the private key", block.Type)
+		return nil, fmt.Errorf("PEM block %q is not a public key: send the public key, never the private key", block.Type)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("parsing public key: %w", err)
+		return nil, fmt.Errorf("failed to parse public key: %w", err)
 	}
 
 	pub, ok := parsed.(*rsa.PublicKey)

@@ -70,7 +70,7 @@ func NewSecretHandler(client *kubernetes.Client, filter *resourcefilter.Filter, 
 		getSecret: func(ctx context.Context, kubeContext, namespace, name string) (*unstructured.Unstructured, error) {
 			c, err := client.ForContext(kubeContext)
 			if err != nil {
-				return nil, fmt.Errorf("failed to create client with context %s: %w", kubeContext, err)
+				return nil, fmt.Errorf("failed to create client with context %q: %w", kubeContext, err)
 			}
 			return c.GetResource(ctx, secrets.GVR, namespace, name)
 		},
@@ -191,7 +191,7 @@ func (h *SecretHandler) secretValue(ctx context.Context, ref *secretRef) ([]byte
 		if h.alwaysStart && connectivity.IsError(err) {
 			return nil, mcp.NewToolResultError(connectivity.ErrorMessage(err))
 		}
-		return nil, mcp.NewToolResultError(fmt.Sprintf("failed to get secret: %v", err))
+		return nil, mcp.NewToolResultError(fmt.Sprintf("failed to get secret %q: %v", ref.Name, err))
 	}
 
 	value, err := secretDataValue(secret, ref.Name, ref.Key)

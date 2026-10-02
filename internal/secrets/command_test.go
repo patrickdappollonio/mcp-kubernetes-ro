@@ -2,6 +2,8 @@ package secrets
 
 import (
 	"bytes"
+	"errors"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -72,12 +74,17 @@ func TestDecryptCommandWithOpenSSL(t *testing.T) {
 	requireOpenSSL(t)
 
 	tests := []struct {
-		name  string
-		value []byte
+		name     string
+		value    []byte
+		existing string // contents of a file already at the output path
+		damage   bool   // flip one character of the first block
+		wantErr  bool
 	}{
-		{"short value", []byte("s3cr3t-p@ss\n")},
-		{"multi-block value", bytes.Repeat([]byte("-----certificate line-----\n"), 100)},
-		{"empty value", []byte{}},
+		{name: "short value", value: []byte("s3cr3t-p@ss\n")},
+		{name: "multi-block value", value: bytes.Repeat([]byte("-----certificate line-----\n"), 100)},
+		{name: "empty value", value: []byte{}},
+		{name: "refuses to overwrite an existing file", value: []byte("new value"), existing: "keep me", wantErr: true},
+		{name: "fails on a damaged block", value: []byte("value"), damage: true, wantErr: true},
 	}
 
 	for _, tt := range tests {
@@ -87,13 +94,37 @@ func TestDecryptCommandWithOpenSSL(t *testing.T) {
 			dir := t.TempDir()
 			keyPath, pub := generateKeyWithOpenSSL(t, dir)
 			outPath := filepath.Join(dir, "secret value")
-
+			if tt.existing != "" {
+				if err := os.WriteFile(outPath, []byte(tt.existing), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
 			blocks, err := Encrypt(pub, tt.value)
 			if err != nil {
 				t.Fatalf("Encrypt() error = %v", err)
 			}
+			if tt.damage {
+				damaged := []byte(blocks[0])
+				damaged[10] = map[bool]byte{true: 'B', false: 'A'}[damaged[10] == 'A']
+				blocks[0] = string(damaged)
+			}
 
-			if out, err := runShell(t, DecryptCommand(blocks, keyPath, outPath)); err != nil {
+			out, err := runShell(t, DecryptCommand(blocks, keyPath, outPath))
+
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("decrypt command succeeded, want a failure:\n%s", out)
+				}
+				got, readErr := os.ReadFile(outPath)
+				switch {
+				case tt.existing != "" && string(got) != tt.existing:
+					t.Errorf("existing file changed to %q, want %q", got, tt.existing)
+				case tt.existing == "" && !errors.Is(readErr, fs.ErrNotExist):
+					t.Errorf("output file left behind after a failed decryption (read error: %v)", readErr)
+				}
+				return
+			}
+			if err != nil {
 				t.Fatalf("decrypt command failed: %v\n%s", err, out)
 			}
 
@@ -102,69 +133,18 @@ func TestDecryptCommandWithOpenSSL(t *testing.T) {
 				t.Fatalf("reading output: %v", err)
 			}
 			if !bytes.Equal(got, tt.value) {
-				t.Fatalf("decrypted value mismatch: got %q, want %q", got, tt.value)
+				t.Errorf("decrypted value = %q, want %q", got, tt.value)
 			}
-
 			info, err := os.Stat(outPath)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if perm := info.Mode().Perm(); perm != 0o600 {
-				t.Fatalf("output permissions = %o, want 600", perm)
+				t.Errorf("output permissions = %o, want 600", perm)
 			}
-
-			if _, err := os.Stat(keyPath); !os.IsNotExist(err) {
-				t.Fatalf("private key still exists after decryption (stat error: %v)", err)
+			if _, err := os.Stat(keyPath); !errors.Is(err, fs.ErrNotExist) {
+				t.Errorf("private key still exists after decryption (stat error: %v)", err)
 			}
 		})
-	}
-}
-
-func TestDecryptCommandRefusesToOverwrite(t *testing.T) {
-	t.Parallel()
-	requireOpenSSL(t)
-
-	dir := t.TempDir()
-	keyPath, pub := generateKeyWithOpenSSL(t, dir)
-	outPath := filepath.Join(dir, "existing")
-	if err := os.WriteFile(outPath, []byte("keep me"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	blocks, err := Encrypt(pub, []byte("new value"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if out, err := runShell(t, DecryptCommand(blocks, keyPath, outPath)); err == nil {
-		t.Fatalf("decrypt command succeeded over an existing file:\n%s", out)
-	}
-
-	if got, _ := os.ReadFile(outPath); string(got) != "keep me" {
-		t.Fatalf("existing file was changed to %q", got)
-	}
-}
-
-func TestDecryptCommandFailsOnDamagedBlock(t *testing.T) {
-	t.Parallel()
-	requireOpenSSL(t)
-
-	dir := t.TempDir()
-	keyPath, pub := generateKeyWithOpenSSL(t, dir)
-	outPath := filepath.Join(dir, "out")
-
-	blocks, err := Encrypt(pub, []byte("value"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	damaged := []byte(blocks[0])
-	damaged[10] = map[bool]byte{true: 'B', false: 'A'}[damaged[10] == 'A']
-
-	if out, err := runShell(t, DecryptCommand([]string{string(damaged)}, keyPath, outPath)); err == nil {
-		t.Fatalf("decrypt command succeeded with a damaged block:\n%s", out)
-	}
-
-	if _, err := os.Stat(outPath); !os.IsNotExist(err) {
-		t.Fatalf("output file left behind after a failed decryption (stat error: %v)", err)
 	}
 }

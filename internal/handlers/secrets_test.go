@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -109,107 +110,106 @@ func TestSecretHandlerToolsDependOnMode(t *testing.T) {
 	}
 }
 
-func TestSaveSecretToFile(t *testing.T) {
-	t.Parallel()
-
-	h := &SecretHandler{mode: SecretAccessFile, getSecret: fakeSecret()}
-	path := filepath.Join(t.TempDir(), "db-password")
-
-	text, isError := callTool(t, h.SaveSecretToFile, map[string]any{
-		"namespace": "prod", "name": "db", "key": "password", "path": path,
-	})
-	if isError {
-		t.Fatalf("tool returned an error: %s", text)
-	}
-
-	if strings.Contains(text, testSecretValue) {
-		t.Fatalf("tool response contains the secret value: %s", text)
-	}
-	if !strings.Contains(text, path) {
-		t.Fatalf("tool response does not mention the file path: %s", text)
-	}
-
-	got, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(got) != testSecretValue {
-		t.Fatalf("file contents = %q, want %q", got, testSecretValue)
-	}
-}
-
-func TestSaveSecretToFileReportsWriteErrors(t *testing.T) {
-	t.Parallel()
-
-	h := &SecretHandler{mode: SecretAccessFile, getSecret: fakeSecret()}
-
-	text, isError := callTool(t, h.SaveSecretToFile, map[string]any{
-		"namespace": "prod", "name": "db", "key": "password", "path": "relative/path",
-	})
-	if !isError || !strings.Contains(text, "absolute") {
-		t.Fatalf("expected an 'absolute' error, got isError=%v text=%s", isError, text)
-	}
-}
-
-func TestSecretToolsListAvailableKeysWhenKeyIsMissing(t *testing.T) {
-	t.Parallel()
-
-	h := &SecretHandler{mode: SecretAccessFile, getSecret: fakeSecret()}
-
-	text, isError := callTool(t, h.SaveSecretToFile, map[string]any{
-		"namespace": "prod", "name": "db", "key": "pasword", "path": filepath.Join(t.TempDir(), "x"),
-	})
-	if !isError {
-		t.Fatalf("expected an error, got: %s", text)
-	}
-	if !strings.Contains(text, "password, username") {
-		t.Fatalf("error does not list the available keys: %s", text)
-	}
-	if strings.Contains(text, testSecretValue) {
-		t.Fatalf("error contains the secret value: %s", text)
-	}
-}
-
-func TestSecretToolsRequireParameters(t *testing.T) {
-	t.Parallel()
-
-	h := &SecretHandler{mode: SecretAccessFile, getSecret: fakeSecret()}
-
-	for _, missing := range []string{"name", "key", "path"} {
-		args := map[string]any{"namespace": "prod", "name": "db", "key": "password", "path": "/tmp/x"}
-		delete(args, missing)
-
-		text, isError := callTool(t, h.SaveSecretToFile, args)
-		if !isError || !strings.Contains(text, missing+" is required") {
-			t.Errorf("without %q: isError=%v text=%s", missing, isError, text)
-		}
-	}
-}
-
 type staticResolver struct{}
 
 func (staticResolver) ResolveResourceType(string, string) (schema.GroupVersionResource, error) {
 	return secrets.GVR, nil
 }
 
-func TestSecretToolsHonorDisabledResources(t *testing.T) {
+type failingResolver struct{}
+
+func (failingResolver) ResolveResourceType(string, string) (schema.GroupVersionResource, error) {
+	return schema.GroupVersionResource{}, errors.New("discovery unavailable")
+}
+
+func TestSaveSecretToFile(t *testing.T) {
 	t.Parallel()
 
-	filter, err := resourcefilter.NewFilter("secrets", staticResolver{})
+	blocked, err := resourcefilter.NewFilter("secrets", staticResolver{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := &SecretHandler{mode: SecretAccessFile, getSecret: fakeSecret(), resourceFilter: filter}
-	path := filepath.Join(t.TempDir(), "x")
-
-	text, isError := callTool(t, h.SaveSecretToFile, map[string]any{
-		"namespace": "prod", "name": "db", "key": "password", "path": path,
-	})
-	if !isError || !strings.Contains(text, "disabled") {
-		t.Fatalf("expected a disabled error, got isError=%v text=%s", isError, text)
+	broken, err := resourcefilter.NewLazyFilter("secrets", failingResolver{})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatal("file was written even though secrets are disabled")
+	invalidBase64 := func(context.Context, string, string, string) (*unstructured.Unstructured, error) {
+		return &unstructured.Unstructured{Object: map[string]any{
+			"data": map[string]any{"password": "not base64!"},
+		}}, nil
+	}
+
+	tests := []struct {
+		name      string
+		getSecret secretGetter
+		filter    *resourcefilter.Filter
+		args      map[string]any // merged over a valid request; nil deletes a key
+		wantErr   []string       // substrings of the tool error; empty means success
+	}{
+		{name: "writes the value"},
+		{name: "requires name", args: map[string]any{"name": nil}, wantErr: []string{"name is required"}},
+		{name: "requires key", args: map[string]any{"key": nil}, wantErr: []string{"key is required"}},
+		{name: "requires path", args: map[string]any{"path": nil}, wantErr: []string{"path is required"}},
+		{name: "rejects a relative path", args: map[string]any{"path": "relative/path"}, wantErr: []string{"absolute"}},
+		{name: "lists the keys when the key is missing", args: map[string]any{"key": "pasword"}, wantErr: []string{`no key "pasword"`, "password, username"}},
+		{name: "reports a value that is not base64", getSecret: invalidBase64, wantErr: []string{"not valid base64"}},
+		{name: "honors disabled resources", filter: blocked, wantErr: []string{"disabled by configuration"}},
+		{name: "fails closed when the filter cannot initialize", filter: broken, wantErr: []string{"resource filter could not be initialized", "discovery unavailable"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			path := filepath.Join(t.TempDir(), "db-password")
+			args := map[string]any{"namespace": "prod", "name": "db", "key": "password", "path": path}
+			for k, v := range tt.args {
+				if v == nil {
+					delete(args, k)
+				} else {
+					args[k] = v
+				}
+			}
+			getSecret := tt.getSecret
+			if getSecret == nil {
+				getSecret = fakeSecret()
+			}
+			h := &SecretHandler{mode: SecretAccessFile, getSecret: getSecret, resourceFilter: tt.filter}
+
+			text, isError := callTool(t, h.SaveSecretToFile, args)
+
+			if strings.Contains(text, testSecretValue) {
+				t.Fatalf("SaveSecretToFile response contains the secret value: %s", text)
+			}
+			if len(tt.wantErr) > 0 {
+				if !isError {
+					t.Fatalf("SaveSecretToFile succeeded with %s, want an error", text)
+				}
+				for _, want := range tt.wantErr {
+					if !strings.Contains(text, want) {
+						t.Errorf("SaveSecretToFile error = %q, want it to contain %q", text, want)
+					}
+				}
+				if _, err := os.Stat(path); !errors.Is(err, fs.ErrNotExist) {
+					t.Errorf("SaveSecretToFile wrote %q despite failing (stat error: %v)", path, err)
+				}
+				return
+			}
+
+			if isError {
+				t.Fatalf("SaveSecretToFile error = %s, want success", text)
+			}
+			if !strings.Contains(text, path) {
+				t.Errorf("SaveSecretToFile response = %s, want it to mention %q", text, path)
+			}
+			got, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != testSecretValue {
+				t.Errorf("file contents = %q, want %q", got, testSecretValue)
+			}
+		})
 	}
 }
 
@@ -224,70 +224,75 @@ func TestGetSecretEncrypted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pub := string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}))
+	validKey := string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}))
 
-	h := &SecretHandler{mode: SecretAccessEncrypted, getSecret: fakeSecret()}
-
-	text, isError := callTool(t, h.GetSecretEncrypted, map[string]any{
-		"namespace":        "prod",
-		"name":             "db",
-		"key":              "password",
-		"public_key":       pub,
-		"private_key_path": "/tmp/k8s-secret-key.pem",
-		"output_path":      "/home/user/db-password",
-	})
-	if isError {
-		t.Fatalf("tool returned an error: %s", text)
-	}
-	if strings.Contains(text, testSecretValue) {
-		t.Fatalf("tool response contains the secret value: %s", text)
+	tests := []struct {
+		name      string
+		publicKey string
+		wantErr   string
+	}{
+		{name: "encrypts the value to the key", publicKey: validKey},
+		{name: "rejects a key that is not PEM", publicKey: "not a key", wantErr: "PEM"},
+		{name: "requires a public key", publicKey: "", wantErr: "public_key is required"},
 	}
 
-	var got struct {
-		DecryptCommand string `json:"decrypt_command"`
-	}
-	if err := json.Unmarshal([]byte(text), &got); err != nil {
-		t.Fatalf("response is not JSON: %v\n%s", err, text)
-	}
-	if !strings.Contains(got.DecryptCommand, "'/tmp/k8s-secret-key.pem'") ||
-		!strings.Contains(got.DecryptCommand, "'/home/user/db-password'") {
-		t.Fatalf("decrypt command does not use the given paths:\n%s", got.DecryptCommand)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-	// Every long line of the command is an encrypted block; decrypting them
-	// in order must give back the value.
-	var plain []byte
-	for line := range strings.Lines(got.DecryptCommand) {
-		ct, err := base64.StdEncoding.DecodeString(strings.TrimSpace(line))
-		if err != nil || len(ct) != key.PublicKey.Size() {
-			continue
-		}
-		part, err := rsa.DecryptOAEP(sha1.New(), nil, key, ct, nil)
-		if err != nil {
-			t.Fatalf("decrypting block: %v", err)
-		}
-		plain = append(plain, part...)
-	}
-	if !bytes.Equal(plain, []byte(testSecretValue)) {
-		t.Fatalf("decrypted value = %q, want %q", plain, testSecretValue)
-	}
-}
+			h := &SecretHandler{mode: SecretAccessEncrypted, getSecret: fakeSecret()}
 
-func TestGetSecretEncryptedRejectsBadPublicKey(t *testing.T) {
-	t.Parallel()
+			text, isError := callTool(t, h.GetSecretEncrypted, map[string]any{
+				"namespace":        "prod",
+				"name":             "db",
+				"key":              "password",
+				"public_key":       tt.publicKey,
+				"private_key_path": "/tmp/k8s-secret-key.pem",
+				"output_path":      "/home/user/db-password",
+			})
 
-	h := &SecretHandler{mode: SecretAccessEncrypted, getSecret: fakeSecret()}
+			if strings.Contains(text, testSecretValue) {
+				t.Fatalf("GetSecretEncrypted response contains the secret value: %s", text)
+			}
+			if tt.wantErr != "" {
+				if !isError || !strings.Contains(text, tt.wantErr) {
+					t.Fatalf("GetSecretEncrypted = (isError=%v) %s, want an error containing %q", isError, text, tt.wantErr)
+				}
+				return
+			}
+			if isError {
+				t.Fatalf("GetSecretEncrypted error = %s, want success", text)
+			}
 
-	text, isError := callTool(t, h.GetSecretEncrypted, map[string]any{
-		"namespace":        "prod",
-		"name":             "db",
-		"key":              "password",
-		"public_key":       "not a key",
-		"private_key_path": "/tmp/k.pem",
-		"output_path":      "/tmp/out",
-	})
-	if !isError || !strings.Contains(text, "PEM") {
-		t.Fatalf("expected a PEM error, got isError=%v text=%s", isError, text)
+			var got struct {
+				DecryptCommand string `json:"decrypt_command"`
+			}
+			if err := json.Unmarshal([]byte(text), &got); err != nil {
+				t.Fatalf("response is not JSON: %v\n%s", err, text)
+			}
+			if !strings.Contains(got.DecryptCommand, "'/tmp/k8s-secret-key.pem'") ||
+				!strings.Contains(got.DecryptCommand, "'/home/user/db-password'") {
+				t.Fatalf("decrypt command does not use the given paths:\n%s", got.DecryptCommand)
+			}
+
+			// Every line of the command that decodes to one RSA block is an
+			// encrypted block; decrypting them in order must give back the value.
+			var plain []byte
+			for line := range strings.Lines(got.DecryptCommand) {
+				ct, err := base64.StdEncoding.DecodeString(strings.TrimSpace(line))
+				if err != nil || len(ct) != key.PublicKey.Size() {
+					continue
+				}
+				part, err := rsa.DecryptOAEP(sha1.New(), nil, key, ct, nil)
+				if err != nil {
+					t.Fatalf("decrypting block: %v", err)
+				}
+				plain = append(plain, part...)
+			}
+			if !bytes.Equal(plain, []byte(testSecretValue)) {
+				t.Fatalf("decrypted value = %q, want %q", plain, testSecretValue)
+			}
+		})
 	}
 }
 
@@ -328,28 +333,6 @@ func TestSecretAccessInstructions(t *testing.T) {
 				t.Errorf("mode %v instructions should not mention %q:\n%s", tt.mode, s, got)
 			}
 		}
-	}
-}
-
-func TestSecretToolsReportInvalidBase64(t *testing.T) {
-	t.Parallel()
-
-	getter := func(context.Context, string, string, string) (*unstructured.Unstructured, error) {
-		return &unstructured.Unstructured{Object: map[string]any{
-			"data": map[string]any{"password": "not base64!"},
-		}}, nil
-	}
-	h := &SecretHandler{mode: SecretAccessFile, getSecret: getter}
-	path := filepath.Join(t.TempDir(), "x")
-
-	text, isError := callTool(t, h.SaveSecretToFile, map[string]any{
-		"namespace": "prod", "name": "db", "key": "password", "path": path,
-	})
-	if !isError || !strings.Contains(text, "not valid base64") {
-		t.Fatalf("expected a base64 error, got isError=%v text=%s", isError, text)
-	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatal("file was written for an invalid value")
 	}
 }
 
@@ -395,32 +378,5 @@ func TestSecretDataValue(t *testing.T) {
 				t.Fatalf("value = %q, want %q", got, tt.want)
 			}
 		})
-	}
-}
-
-type failingResolver struct{}
-
-func (failingResolver) ResolveResourceType(string, string) (schema.GroupVersionResource, error) {
-	return schema.GroupVersionResource{}, errors.New("discovery unavailable")
-}
-
-func TestSecretToolsFailClosedWhenFilterCannotInitialize(t *testing.T) {
-	t.Parallel()
-
-	filter, err := resourcefilter.NewLazyFilter("secrets", failingResolver{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	h := &SecretHandler{mode: SecretAccessFile, getSecret: fakeSecret(), resourceFilter: filter}
-	path := filepath.Join(t.TempDir(), "x")
-
-	text, isError := callTool(t, h.SaveSecretToFile, map[string]any{
-		"namespace": "prod", "name": "db", "key": "password", "path": path,
-	})
-	if !isError || !strings.Contains(text, "resource filter could not be initialized") || !strings.Contains(text, "discovery unavailable") {
-		t.Fatalf("expected a filter initialization error, got isError=%v text=%s", isError, text)
-	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatal("file was written while the filter could not initialize")
 	}
 }
