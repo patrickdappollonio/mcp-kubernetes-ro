@@ -160,7 +160,7 @@ func main() {
 	}
 
 	// Define tools and handlers
-	resourceHandler := handlers.NewResourceHandler(client, resFilter, alwaysStartEnabled, secretAccessMode == handlers.SecretAccessInsecure)
+	resourceHandler := handlers.NewResourceHandler(client, resFilter, alwaysStartEnabled, secretAccessMode)
 	logHandler := handlers.NewLogHandler(client, alwaysStartEnabled)
 	metricsHandler := handlers.NewMetricsHandler(client, alwaysStartEnabled)
 	utilsHandler := handlers.NewUtilsHandler()

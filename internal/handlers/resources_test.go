@@ -303,24 +303,37 @@ func TestPrepareResourceSummaryHidesSecretLastApplied(t *testing.T) {
 	}
 }
 
-func TestGetResourceDescriptionMentionsHiddenSecrets(t *testing.T) {
+func TestGetResourceDescriptionPointsToTheSecretTool(t *testing.T) {
 	t.Parallel()
 
-	description := func(exposeSecrets bool) string {
-		h := &ResourceHandler{exposeSecrets: exposeSecrets}
-		for _, tool := range h.GetTools() {
-			if tool.Tool().Name == "get_resource" {
-				return tool.Tool().Description
-			}
-		}
-		t.Fatal("get_resource tool not found")
-		return ""
+	tests := []struct {
+		mode        SecretAccessMode
+		mustHave    []string
+		mustNotHave []string
+	}{
+		{SecretAccessFile, []string{"Secret values are hidden", "save_secret_to_file"}, []string{"get_secret_encrypted"}},
+		{SecretAccessEncrypted, []string{"Secret values are hidden", "get_secret_encrypted"}, []string{"save_secret_to_file"}},
+		{SecretAccessInsecure, nil, []string{"Secret values are hidden", "save_secret_to_file", "get_secret_encrypted"}},
 	}
 
-	if got := description(false); !strings.Contains(got, "Secret values are hidden") {
-		t.Fatalf("description does not say Secret values are hidden: %s", got)
-	}
-	if got := description(true); strings.Contains(got, "Secret values are hidden") {
-		t.Fatalf("description says Secret values are hidden under insecure access: %s", got)
+	for _, tt := range tests {
+		h := &ResourceHandler{secretAccess: tt.mode}
+		var description string
+		for _, tool := range h.GetTools() {
+			if tool.Tool().Name == "get_resource" {
+				description = tool.Tool().Description
+			}
+		}
+
+		for _, want := range tt.mustHave {
+			if !strings.Contains(description, want) {
+				t.Errorf("mode %v get_resource description = %q, want it to contain %q", tt.mode, description, want)
+			}
+		}
+		for _, unwanted := range tt.mustNotHave {
+			if strings.Contains(description, unwanted) {
+				t.Errorf("mode %v get_resource description = %q, want it without %q", tt.mode, description, unwanted)
+			}
+		}
 	}
 }

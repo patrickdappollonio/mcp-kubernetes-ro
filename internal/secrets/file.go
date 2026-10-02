@@ -36,3 +36,24 @@ func WriteFile(path string, data []byte) error {
 
 	return nil
 }
+
+// WriteTempFile writes data to a file named name inside a new owner-only
+// folder in the system temp directory, and returns the file's path.
+func WriteTempFile(name string, data []byte) (string, error) {
+	if name == "" || name == "." || name == ".." || filepath.Base(name) != name {
+		name = "value"
+	}
+
+	dir, err := os.MkdirTemp("", "mcp-kubernetes-ro-secret-")
+	if err != nil {
+		return "", fmt.Errorf("failed to create temp folder: %w", err)
+	}
+
+	path := filepath.Join(dir, name)
+	if err := WriteFile(path, data); err != nil {
+		_ = os.RemoveAll(dir) // best effort: the folder is new and holds nothing else
+		return "", err
+	}
+
+	return path, nil
+}

@@ -35,6 +35,27 @@ const (
 	SecretAccessInsecure
 )
 
+// Names of the secret tools, one per mode that hides Secret values.
+const (
+	saveSecretToFileTool   = "save_secret_to_file"
+	getSecretEncryptedTool = "get_secret_encrypted"
+)
+
+// toolName returns the tool that retrieves a Secret value in mode m, or ""
+// when Secret values are not hidden.
+func (m SecretAccessMode) toolName() string {
+	switch m {
+	case SecretAccessFile:
+		return saveSecretToFileTool
+	case SecretAccessEncrypted:
+		return getSecretEncryptedTool
+	case SecretAccessInsecure:
+		return ""
+	default:
+		return ""
+	}
+}
+
 // SecretAccessModeFor returns the mode for a transport, or
 // SecretAccessInsecure when insecure access was requested.
 func SecretAccessModeFor(transport string, insecure bool) SecretAccessMode {
@@ -89,8 +110,9 @@ type secretRef struct {
 type SaveSecretToFileParams struct {
 	secretRef
 
-	// Path is the absolute path of the new file to write the value to.
-	Path string `json:"path"`
+	// Path is the absolute path of the new file to write the value to. When
+	// empty, the value goes to a new owner-only folder in the temp directory.
+	Path string `json:"path,omitempty"`
 }
 
 // GetSecretEncryptedParams defines the parameters for the get_secret_encrypted MCP tool.
@@ -117,23 +139,26 @@ func (h *SecretHandler) SaveSecretToFile(ctx context.Context, request mcp.CallTo
 		return response.Errorf("failed to parse arguments: %s", err)
 	}
 
-	if params.Path == "" {
-		return response.Error("path is required")
-	}
-
 	value, errResult := h.secretValue(ctx, &params.secretRef)
 	if errResult != nil {
 		return errResult, nil
 	}
 
-	if err := secrets.WriteFile(params.Path, value); err != nil {
+	path := params.Path
+	var err error
+	if path == "" {
+		path, err = secrets.WriteTempFile(params.Key, value)
+	} else {
+		err = secrets.WriteFile(path, value)
+	}
+	if err != nil {
 		return response.Errorf("failed to write secret value: %v", err)
 	}
 
 	return response.JSON(map[string]any{
-		"path":  params.Path,
+		"path":  path,
 		"bytes": len(value),
-		"note":  "The value was written to the file and is not included here. Use the file from scripts instead of printing it.",
+		"note":  "The value was written to the file and is not included here. Have scripts read the file, never print it, and delete it once it is no longer needed.",
 	})
 }
 
@@ -168,7 +193,7 @@ func (h *SecretHandler) GetSecretEncrypted(ctx context.Context, request mcp.Call
 		"bytes":           len(value),
 		"blocks":          len(blocks),
 		"decrypt_command": secrets.DecryptCommand(blocks, params.PrivateKeyPath, params.OutputPath),
-		"note":            "Run decrypt_command exactly as given, in a POSIX shell on the user's machine. It writes the value to output_path with owner-only permissions and deletes the private key. Do not print the file afterwards.",
+		"note":            "Run decrypt_command exactly as given, in a POSIX shell on the user's machine. It writes the value to output_path with owner-only permissions and deletes the private key. Never print the decrypted value, and delete the file when it is no longer needed.",
 	})
 }
 
@@ -262,16 +287,17 @@ func (h *SecretHandler) GetTools() []MCPTool {
 	switch h.mode {
 	case SecretAccessFile:
 		opts := append([]mcp.ToolOption{
-			mcp.WithDescription("Write one Secret value to a new file on the user's machine without returning the value. " +
+			mcp.WithDescription("Write one Secret value to a file on the user's machine without returning the value. " +
 				"Use this whenever a Secret value is needed, for example by a script; get_resource hides Secret values. " +
-				"The file is created with owner-only permissions (0600) and existing files are never overwritten. " +
-				"The response contains only the path and size. Do not print the file's contents afterwards."),
+				"By default the file goes in a new private folder in the system temp directory, outside any project, and the response gives its path and size. " +
+				"Pass the file to a script, for example DB_PASSWORD=\"$(cat <path>)\" ./script.sh, and delete the file when the script no longer needs it. " +
+				"Never print, cat or echo the value, even when a script fails."),
 			mcp.WithString("path",
-				mcp.Required(),
-				mcp.Description("Absolute path of the new file to create, e.g. /home/user/project/.secrets/db-password"),
+				mcp.Description("Optional absolute path for the new file. Leave it empty to use a private temp folder. "+
+					"The file is created with owner-only permissions (0600) and an existing file is never overwritten."),
 			),
 		}, secretRefOptions()...)
-		return []MCPTool{NewMCPTool(mcp.NewTool("save_secret_to_file", opts...), h.SaveSecretToFile)}
+		return []MCPTool{NewMCPTool(mcp.NewTool(saveSecretToFileTool, opts...), h.SaveSecretToFile)}
 
 	case SecretAccessEncrypted:
 		opts := append([]mcp.ToolOption{
@@ -282,7 +308,7 @@ func (h *SecretHandler) GetTools() []MCPTool {
 				"(2) print its public key: openssl rsa -in /tmp/k8s-secret-key.pem -pubout " +
 				"(3) call this tool with that public key, the private key path and the output path " +
 				"(4) run the returned decrypt_command exactly as given. It writes the value to output_path with owner-only permissions and deletes the private key. " +
-				"Never send the private key, and do not print the decrypted file."),
+				"Delete the decrypted file when the script no longer needs it. Never send the private key, and never print the decrypted value, even when a script fails."),
 			mcp.WithString("public_key",
 				mcp.Required(),
 				mcp.Description("PEM-encoded RSA public key (at least 2048 bits), including the -----BEGIN PUBLIC KEY----- and -----END PUBLIC KEY----- lines"),
@@ -296,7 +322,7 @@ func (h *SecretHandler) GetTools() []MCPTool {
 				mcp.Description("Path on the user's machine where the decrypt command writes the value. Must not exist yet."),
 			),
 		}, secretRefOptions()...)
-		return []MCPTool{NewMCPTool(mcp.NewTool("get_secret_encrypted", opts...), h.GetSecretEncrypted)}
+		return []MCPTool{NewMCPTool(mcp.NewTool(getSecretEncryptedTool, opts...), h.GetSecretEncrypted)}
 
 	case SecretAccessInsecure:
 		return nil
@@ -316,9 +342,11 @@ func SecretAccessInstructions(mode SecretAccessMode) string {
 	switch mode {
 	case SecretAccessFile:
 		return "SECRETS:\n" + why +
-			"• When a Secret value is needed, for example by a script, call save_secret_to_file with an absolute path. " +
-			"The server writes the value to a new owner-only file on this machine and returns only the path.\n" +
-			"• Have scripts read the file. Do not print, cat or echo its contents into the conversation."
+			"• When a Secret value is needed, for example by a script, call save_secret_to_file. " +
+			"By default the server writes the value to a new owner-only folder in the system temp directory and returns only the file's path. " +
+			"Pass an absolute path only if the file must go somewhere else.\n" +
+			"• Have scripts read the file, for example DB_PASSWORD=\"$(cat <path>)\" ./script.sh, and delete the file when the script no longer needs it.\n" +
+			"• Never print, cat or echo the value into the conversation, even when a script fails."
 
 	case SecretAccessEncrypted:
 		return "SECRETS:\n" + why +
@@ -328,7 +356,8 @@ func SecretAccessInstructions(mode SecretAccessMode) string {
 			"  2. Print its public key: openssl rsa -in /tmp/k8s-secret-key.pem -pubout\n" +
 			"  3. Call get_secret_encrypted with that public key, private_key_path=/tmp/k8s-secret-key.pem and the output_path to write.\n" +
 			"  4. Run the returned decrypt_command exactly as given. It writes the value to output_path with owner-only permissions and deletes the private key.\n" +
-			"• Use a new key pair for every value. Never send the private key, and do not print, cat or echo the decrypted file."
+			"• Use a new key pair for every value, and delete the decrypted file when the script no longer needs it. " +
+			"Never send the private key, and never print, cat or echo the decrypted value, even when a script fails."
 
 	case SecretAccessInsecure:
 		return "SECRETS:\n" +

@@ -94,18 +94,27 @@ func TestSecretHandlerToolsDependOnMode(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		mode SecretAccessMode
-		want []string
+		mode     SecretAccessMode
+		want     []string
+		optional []string // arguments the tool must not require
 	}{
-		{SecretAccessFile, []string{"save_secret_to_file"}},
-		{SecretAccessEncrypted, []string{"get_secret_encrypted"}},
-		{SecretAccessInsecure, []string{}},
+		{SecretAccessFile, []string{"save_secret_to_file"}, []string{"path", "namespace", "context"}},
+		{SecretAccessEncrypted, []string{"get_secret_encrypted"}, []string{"namespace", "context"}},
+		{SecretAccessInsecure, []string{}, nil},
 	}
 
 	for _, tt := range tests {
 		h := &SecretHandler{mode: tt.mode, getSecret: fakeSecret()}
-		if got := toolNames(h.GetTools()); !slices.Equal(got, tt.want) {
+		tools := h.GetTools()
+		if got := toolNames(tools); !slices.Equal(got, tt.want) {
 			t.Errorf("mode %v tools = %v, want %v", tt.mode, got, tt.want)
+		}
+		for _, tool := range tools {
+			for _, arg := range tt.optional {
+				if slices.Contains(tool.Tool().InputSchema.Required, arg) {
+					t.Errorf("%s requires %q, want it optional", tool.Tool().Name, arg)
+				}
+			}
 		}
 	}
 }
@@ -145,11 +154,12 @@ func TestSaveSecretToFile(t *testing.T) {
 		filter    *resourcefilter.Filter
 		args      map[string]any // merged over a valid request; nil deletes a key
 		wantErr   []string       // substrings of the tool error; empty means success
+		wantTemp  bool           // the value lands in a new folder in the temp directory
 	}{
 		{name: "writes the value"},
 		{name: "requires name", args: map[string]any{"name": nil}, wantErr: []string{"name is required"}},
 		{name: "requires key", args: map[string]any{"key": nil}, wantErr: []string{"key is required"}},
-		{name: "requires path", args: map[string]any{"path": nil}, wantErr: []string{"path is required"}},
+		{name: "writes to a private temp folder when no path is given", args: map[string]any{"path": nil}, wantTemp: true},
 		{name: "rejects a relative path", args: map[string]any{"path": "relative/path"}, wantErr: []string{"absolute"}},
 		{name: "lists the keys when the key is missing", args: map[string]any{"key": "pasword"}, wantErr: []string{`no key "pasword"`, "password, username"}},
 		{name: "reports a value that is not base64", getSecret: invalidBase64, wantErr: []string{"not valid base64"}},
@@ -199,8 +209,24 @@ func TestSaveSecretToFile(t *testing.T) {
 			if isError {
 				t.Fatalf("SaveSecretToFile error = %s, want success", text)
 			}
-			if !strings.Contains(text, path) {
-				t.Errorf("SaveSecretToFile response = %s, want it to mention %q", text, path)
+			var resp struct {
+				Path string `json:"path"`
+			}
+			if err := json.Unmarshal([]byte(text), &resp); err != nil {
+				t.Fatalf("SaveSecretToFile response is not JSON: %v\n%s", err, text)
+			}
+			if tt.wantTemp {
+				dir := filepath.Dir(resp.Path)
+				t.Cleanup(func() { _ = os.RemoveAll(dir) })
+				if filepath.Dir(dir) != filepath.Clean(os.TempDir()) {
+					t.Errorf("SaveSecretToFile wrote %q, want a new folder inside %q", resp.Path, os.TempDir())
+				}
+				if info, err := os.Stat(dir); err != nil || info.Mode().Perm() != 0o700 {
+					t.Errorf("temp folder %q stat = %v, %v, want permissions 700", dir, info, err)
+				}
+				path = resp.Path
+			} else if resp.Path != path {
+				t.Errorf("SaveSecretToFile path = %q, want %q", resp.Path, path)
 			}
 			got, err := os.ReadFile(path)
 			if err != nil {
@@ -306,12 +332,12 @@ func TestSecretAccessInstructions(t *testing.T) {
 	}{
 		{
 			mode:        SecretAccessFile,
-			mustHave:    []string{"save_secret_to_file", "hidden"},
+			mustHave:    []string{"save_secret_to_file", "hidden", "temp directory", "delete the file", "even when a script fails"},
 			mustNotHave: []string{"get_secret_encrypted", "decode_base64"},
 		},
 		{
 			mode:        SecretAccessEncrypted,
-			mustHave:    []string{"get_secret_encrypted", "hidden", "openssl genrsa", "openssl rsa", "-pubout", "decrypt_command"},
+			mustHave:    []string{"get_secret_encrypted", "hidden", "openssl genrsa", "openssl rsa", "-pubout", "decrypt_command", "delete the decrypted file", "even when a script fails"},
 			mustNotHave: []string{"save_secret_to_file", "decode_base64"},
 		},
 		{

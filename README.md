@@ -175,7 +175,7 @@ There are **11 tools** available by default, plus **3 additional tools** when po
 - **`get_pod_metrics`**: Get pod metrics (CPU and memory usage)
 - **`encode_base64`**: Encode text data to base64 format
 - **`decode_base64`**: Decode base64 data to text format
-- **`save_secret_to_file`** *(stdio only)*: Write one Secret value to a new owner-only file without returning it
+- **`save_secret_to_file`** *(stdio only)*: Write one Secret value to an owner-only file, in a private temp folder by default, without returning it
 - **`get_secret_encrypted`** *(SSE and Streamable HTTP only)*: Return one Secret value encrypted to a public key you provide, plus the command that decrypts it on your machine
 - **`start_port_forward`** *(opt-in)*: Start port forwarding to a pod with one or more port mappings
 - **`stop_port_forward`** *(opt-in)*: Stop an active port-forwarding session by ID
@@ -270,18 +270,19 @@ When an agent needs a value, for example to use it in a script, it retrieves it 
 
 ### stdio: `save_secret_to_file`
 
-The server runs on your machine, so it writes the value straight to a new file and returns only the path and size:
+The server runs on your machine, so it writes the value straight to a file and returns only the path and size:
 
 ```json
 {
   "name": "db-credentials",
   "key": "password",
-  "namespace": "prod",
-  "path": "/home/me/project/.secrets/db-password"
+  "namespace": "prod"
 }
 ```
 
-The path must be absolute. The file is created with owner-only permissions (`0600`), and existing files and symlinks are never overwritten.
+By default, the file goes in a new folder in the system temp directory, for example `/tmp/mcp-kubernetes-ro-secret-1234567/password`. Only you can open the folder (`0700`) and the file (`0600`), and the folder is outside any project, so it cannot be committed by accident. To use another location, pass an absolute `path`. Existing files and symlinks are never overwritten.
+
+The agent passes the file to a script, for example `DB_PASSWORD="$(cat /tmp/mcp-kubernetes-ro-secret-1234567/password)" ./migrate.sh`, and is told to delete the file when the script no longer needs it. The server does not delete it for you.
 
 ### SSE and Streamable HTTP: `get_secret_encrypted`
 

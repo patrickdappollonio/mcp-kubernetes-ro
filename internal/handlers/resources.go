@@ -26,7 +26,7 @@ type ResourceHandler struct {
 	client         *kubernetes.Client
 	resourceFilter *resourcefilter.Filter
 	alwaysStart    bool
-	exposeSecrets  bool
+	secretAccess   SecretAccessMode
 }
 
 // NewResourceHandler creates a new ResourceHandler with the provided Kubernetes client
@@ -34,13 +34,13 @@ type ResourceHandler struct {
 // alwaysStart mirrors the --always-start flag: when true, connectivity and auth errors
 // are intercepted and returned as structured tool errors so the LLM can surface them
 // to the user rather than treating them as retryable failures.
-// exposeSecrets mirrors --insecure-secret-access: when false, Secret values are hidden.
-func NewResourceHandler(client *kubernetes.Client, filter *resourcefilter.Filter, alwaysStart, exposeSecrets bool) *ResourceHandler {
+// secretAccess decides whether Secret values are hidden and which tool retrieves them.
+func NewResourceHandler(client *kubernetes.Client, filter *resourcefilter.Filter, alwaysStart bool, secretAccess SecretAccessMode) *ResourceHandler {
 	return &ResourceHandler{
 		client:         client,
 		resourceFilter: filter,
 		alwaysStart:    alwaysStart,
-		exposeSecrets:  exposeSecrets,
+		secretAccess:   secretAccess,
 	}
 }
 
@@ -158,7 +158,7 @@ func (h *ResourceHandler) ListResources(ctx context.Context, request mcp.CallToo
 		if titleOnly {
 			items[i] = extractResourceTitle(&resource)
 		} else {
-			items[i] = prepareResourceSummary(gvr, &resource, params.IncludeManagedFields, h.exposeSecrets)
+			items[i] = prepareResourceSummary(gvr, &resource, params.IncludeManagedFields, h.secretAccess == SecretAccessInsecure)
 		}
 	}
 
@@ -279,7 +279,7 @@ func (h *ResourceHandler) GetResource(ctx context.Context, request mcp.CallToolR
 		return response.Errorf("failed to get resource: %v", err)
 	}
 
-	return response.JSON(prepareResourceObject(gvr, resource.Object, params.IncludeManagedFields, h.exposeSecrets))
+	return response.JSON(prepareResourceObject(gvr, resource.Object, params.IncludeManagedFields, h.secretAccess == SecretAccessInsecure))
 }
 
 func prepareResourceObject(gvr schema.GroupVersionResource, obj map[string]any, includeManagedFields, exposeSecrets bool) map[string]any {
@@ -596,8 +596,8 @@ func (h *ResourceHandler) ListContexts(_ context.Context, request mcp.CallToolRe
 // discovering API resources, and managing Kubernetes contexts.
 func (h *ResourceHandler) GetTools() []MCPTool {
 	getResourceDescription := "Get specific resource details. metadata.managedFields is omitted unless include_managed_fields=true."
-	if !h.exposeSecrets {
-		getResourceDescription += " Secret values are hidden and shown only with their size; to use a value, follow the SECRETS section of the server instructions."
+	if tool := h.secretAccess.toolName(); tool != "" {
+		getResourceDescription += " Secret values are hidden and shown only with their size; to use a value, call " + tool + "."
 	}
 
 	return []MCPTool{
