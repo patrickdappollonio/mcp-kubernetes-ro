@@ -47,8 +47,7 @@ func (h *UtilsHandler) EncodeBase64(_ context.Context, request mcp.CallToolReque
 	encoded := base64.StdEncoding.EncodeToString([]byte(params.Data))
 
 	result := map[string]interface{}{
-		"original": params.Data,
-		"encoded":  encoded,
+		"encoded": encoded,
 	}
 
 	return response.JSON(result)
@@ -73,8 +72,7 @@ func (h *UtilsHandler) DecodeBase64(_ context.Context, request mcp.CallToolReque
 	}
 
 	result := map[string]any{
-		"original": params.Data,
-		"decoded":  string(decoded),
+		"decoded": string(decoded),
 	}
 
 	return response.JSON(result)

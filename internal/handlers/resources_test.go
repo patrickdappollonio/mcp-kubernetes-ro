@@ -2,9 +2,11 @@ package handlers
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 func TestSanitizeMetadata(t *testing.T) {
@@ -221,5 +223,117 @@ func TestExtractResourceTitleIsUnchanged(t *testing.T) {
 
 	if !reflect.DeepEqual(title, want) {
 		t.Fatalf("extractResourceTitle() mismatch\nwant: %#v\ngot:  %#v", want, title)
+	}
+}
+
+func secretObject() map[string]any {
+	return map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Secret",
+		"metadata": map[string]any{
+			"name": "db",
+			"annotations": map[string]any{
+				"kubectl.kubernetes.io/last-applied-configuration": `{"data":{"password":"czNjcjN0"}}`,
+			},
+		},
+		"data": map[string]any{"password": "czNjcjN0"},
+	}
+}
+
+var (
+	secretGVR = schema.GroupVersionResource{Version: "v1", Resource: "secrets"}
+	podGVR    = schema.GroupVersionResource{Version: "v1", Resource: "pods"}
+)
+
+func TestPrepareResourceObjectHidesSecretValues(t *testing.T) {
+	t.Parallel()
+
+	got := prepareResourceObject(secretGVR, secretObject(), false, false)
+
+	if v := got["data"].(map[string]any)["password"]; v != "[redacted: 6 bytes]" {
+		t.Fatalf("data.password = %v, want it redacted", v)
+	}
+	annotations := got["metadata"].(map[string]any)["annotations"].(map[string]any)
+	if _, ok := annotations["kubectl.kubernetes.io/last-applied-configuration"]; ok {
+		t.Fatal("last-applied-configuration annotation was not removed")
+	}
+}
+
+func TestPrepareResourceObjectExposesSecretValuesWhenInsecure(t *testing.T) {
+	t.Parallel()
+
+	got := prepareResourceObject(secretGVR, secretObject(), false, true)
+
+	if v := got["data"].(map[string]any)["password"]; v != "czNjcjN0" {
+		t.Fatalf("data.password = %v, want the original value", v)
+	}
+}
+
+func TestPrepareResourceObjectLeavesOtherResourcesAlone(t *testing.T) {
+	t.Parallel()
+
+	obj := secretObject()
+	obj["kind"] = "Pod"
+
+	got := prepareResourceObject(podGVR, obj, false, false)
+
+	if v := got["data"].(map[string]any)["password"]; v != "czNjcjN0" {
+		t.Fatalf("data.password = %v, want non-Secret data untouched", v)
+	}
+}
+
+func TestPrepareResourceSummaryHidesSecretLastApplied(t *testing.T) {
+	t.Parallel()
+
+	resource := &unstructured.Unstructured{Object: secretObject()}
+
+	got := prepareResourceSummary(secretGVR, resource, false, false)
+
+	metadata := got["metadata"].(map[string]any)
+	if annotations, ok := metadata["annotations"].(map[string]any); ok {
+		if _, found := annotations["kubectl.kubernetes.io/last-applied-configuration"]; found {
+			t.Fatal("last-applied-configuration annotation was not removed from the summary")
+		}
+	}
+
+	exposed := prepareResourceSummary(secretGVR, resource, false, true)
+	annotations := exposed["metadata"].(map[string]any)["annotations"].(map[string]any)
+	if _, found := annotations["kubectl.kubernetes.io/last-applied-configuration"]; !found {
+		t.Fatal("last-applied-configuration annotation was removed even with insecure access")
+	}
+}
+
+func TestGetResourceDescriptionPointsToTheSecretTool(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		mode        SecretAccessMode
+		mustHave    []string
+		mustNotHave []string
+	}{
+		{SecretAccessFile, []string{"Secret values are hidden", "save_secret_to_file"}, []string{"get_secret_encrypted"}},
+		{SecretAccessEncrypted, []string{"Secret values are hidden", "get_secret_encrypted"}, []string{"save_secret_to_file"}},
+		{SecretAccessInsecure, nil, []string{"Secret values are hidden", "save_secret_to_file", "get_secret_encrypted"}},
+	}
+
+	for _, tt := range tests {
+		h := &ResourceHandler{secretAccess: tt.mode}
+		var description string
+		for _, tool := range h.GetTools() {
+			if tool.Tool().Name == "get_resource" {
+				description = tool.Tool().Description
+			}
+		}
+
+		for _, want := range tt.mustHave {
+			if !strings.Contains(description, want) {
+				t.Errorf("mode %v get_resource description = %q, want it to contain %q", tt.mode, description, want)
+			}
+		}
+		for _, unwanted := range tt.mustNotHave {
+			if strings.Contains(description, unwanted) {
+				t.Errorf("mode %v get_resource description = %q, want it without %q", tt.mode, description, unwanted)
+			}
+		}
 	}
 }

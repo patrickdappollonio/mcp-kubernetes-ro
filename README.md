@@ -18,6 +18,7 @@ The server leverages your local `kubectl` configuration (even when `kubectl` is 
 - **Multiple Transport Modes**: Support for stdio, Server-Sent Events (SSE), and stateless Streamable HTTP communication
 - **Read-Only Security**: Complete prevention of destructive operations while maintaining full inspection capabilities
 - **Resource Access Control**: Disable access to specific Kubernetes resource types (e.g., Secrets) to prevent AI agents from querying sensitive data
+- **Secret Values Stay Out of the Conversation**: Secret values are hidden from tool output. When an agent needs one, it is written straight to a file (stdio) or delivered encrypted to a key only your machine holds (remote transports). See [Secret Values](#secret-values)
 - **Namespace Support**: Work with specific namespaces or cluster-wide resources
 - **Advanced Filtering**: Support for label selectors, field selectors, and pagination
 - **Per-Command Context**: Specify different Kubernetes contexts for individual commands
@@ -131,27 +132,22 @@ And this is how to leverage the Docker image instead:
         "--rm",
         "-e", "KUBECONFIG=/root/.kube/config",
         "-v", "/path/to/kubeconfig:/root/.kube/config",
+        // Environment variables must be passed with -e, before the image name:
+        // "-e", "MCP_KUBERNETES_RO_DISABLED_TOOLS=get_logs,decode_base64",
+        // "-e", "MCP_KUBERNETES_RO_DISABLED_RESOURCES=secrets,configmaps",
         "ghcr.io/patrickdappollonio/mcp-kubernetes-ro"
         // Place additional flags here, like:
         // "--disabled-tools=get_logs,decode_base64",
         // "--disabled-resources=secrets"
-      ],
-      "env": {
-        // Set KUBECONFIG environment variable if needed:
-        // "KUBECONFIG": "/path/to/kubeconfig",
-        // Set MCP_KUBERNETES_RO_DISABLED_TOOLS environment variable if needed:
-        // "MCP_KUBERNETES_RO_DISABLED_TOOLS": "get_logs,decode_base64",
-        // Or use generic DISABLED_TOOLS environment variable:
-        // "DISABLED_TOOLS": "get_logs,decode_base64",
-        // Disable access to specific resource types:
-        // "MCP_KUBERNETES_RO_DISABLED_RESOURCES": "secrets,configmaps"
-      }
+      ]
     },
   }
 }
 ```
 
-Do note that you'll need to mount your kubeconfig file into the container, and either set the `KUBECONFIG` environment variable to the path of the mounted file, or use the `--kubeconfig` flag to set it.
+Do note that you'll need to mount your kubeconfig file into the container, and either set the `KUBECONFIG` environment variable to the path of the mounted file, or use the `--kubeconfig` flag to set it. An `"env"` block in this configuration only applies to the `docker` command itself, not to the server inside the container, so pass environment variables with `-e` in `args` as shown above.
+
+The container cannot write files to your disk, so the image turns on `--encrypted-secret-access` by default: Secret values are retrieved with `get_secret_encrypted` instead of `save_secret_to_file`, even over stdio. See [Secret Values](#secret-values).
 
 ### Prerequisites
 
@@ -162,10 +158,10 @@ Do note that you'll need to mount your kubeconfig file into the container, and e
 
 ## Available MCP Tools
 
-There are **10 tools** available by default, plus **3 additional tools** when port forwarding is enabled:
+There are **11 tools** available by default, plus **3 additional tools** when port forwarding is enabled. Which secret tool is available depends on the transport, and `--insecure-secret-access` removes it, leaving 10 (see [Secret Values](#secret-values)):
 
 - **`list_resources`**: List any Kubernetes resources by type with optional filtering, sorted newest first. `metadata.managedFields` is omitted by default unless `include_managed_fields=true`
-- **`get_resource`**: Get specific resource details. `metadata.managedFields` is omitted by default unless `include_managed_fields=true`
+- **`get_resource`**: Get specific resource details. `metadata.managedFields` is omitted by default unless `include_managed_fields=true`. Secret values are hidden
 - **`get_logs`**: Get pod logs with advanced filtering options including grep patterns, time filtering, and previous logs
 - **`get_pod_containers`**: List containers in a pod for log access
 - **`list_api_resources`**: List available Kubernetes API resources with their details (similar to kubectl api-resources)
@@ -174,6 +170,8 @@ There are **10 tools** available by default, plus **3 additional tools** when po
 - **`get_pod_metrics`**: Get pod metrics (CPU and memory usage)
 - **`encode_base64`**: Encode text data to base64 format
 - **`decode_base64`**: Decode base64 data to text format
+- **`save_secret_to_file`** *(stdio only)*: Write one Secret value to an owner-only file, in a private temp folder by default, without returning it
+- **`get_secret_encrypted`** *(SSE, Streamable HTTP, or `--encrypted-secret-access`)*: Return one Secret value encrypted to a public key you provide, plus the command that decrypts it on your machine
 - **`start_port_forward`** *(opt-in)*: Start port forwarding to a pod with one or more port mappings
 - **`stop_port_forward`** *(opt-in)*: Stop an active port-forwarding session by ID
 - **`list_port_forwards`** *(opt-in)*: List all active port-forwarding sessions
@@ -211,6 +209,8 @@ When a tool is disabled, it will not be registered with the MCP server and will 
 - `get_pod_metrics`
 - `encode_base64`
 - `decode_base64`
+- `save_secret_to_file` *(only with stdio)*
+- `get_secret_encrypted` *(only with SSE, Streamable HTTP, or `--encrypted-secret-access`)*
 - `start_port_forward` *(only when port forwarding is enabled)*
 - `stop_port_forward` *(only when port forwarding is enabled)*
 - `list_port_forwards` *(only when port forwarding is enabled)*
@@ -254,6 +254,49 @@ access to resource "secrets" (core/v1/secrets) is disabled by configuration and 
 Disabled resources are also hidden from `list_api_resources` output, so AI agents won't discover them as available.
 
 If a resource name cannot be resolved against the cluster (e.g., a typo or a CRD that doesn't exist), the server will refuse to start with a descriptive error — ensuring disabled resources always take effect.
+
+## Secret Values
+
+Tool output stays in the conversation history and in your AI client's logs. A Secret's values are only base64-encoded, which is an encoding and not encryption, so returning them from a tool would leave them readable in plain text.
+
+By default, `get_resource` hides every Secret value and shows only its size, such as `"password": "[redacted: 16 bytes]"`. It also removes the `kubectl.kubernetes.io/last-applied-configuration` annotation, which holds a full copy of the Secret when it was created with `kubectl apply`. `list_resources` removes that annotation too when it returns metadata (`title_only=false`).
+
+When an agent needs a value, for example to use it in a script, it retrieves it with the secret tool for the transport in use. The server instructions explain the steps to the agent.
+
+### stdio: `save_secret_to_file`
+
+The server runs on your machine, so it writes the value straight to a file and returns only the path and size:
+
+```json
+{
+  "name": "db-credentials",
+  "key": "password",
+  "namespace": "prod"
+}
+```
+
+By default, the file goes in a new folder in the system temp directory, for example `/tmp/mcp-kubernetes-ro-secret-1234567/password`. Only you can open the folder (`0700`) and the file (`0600`), and the folder is outside any project, so it cannot be committed by accident. To use another location, pass an absolute `path`. Existing files and symlinks are never overwritten.
+
+The agent passes the file to a script, for example `DB_PASSWORD="$(cat /tmp/mcp-kubernetes-ro-secret-1234567/password)" ./migrate.sh`, and is told to delete the file when the script no longer needs it. The server does not delete it for you.
+
+### SSE, Streamable HTTP and Docker: `get_secret_encrypted`
+
+A remote server, or one running in a container, cannot write to your disk, so the value is encrypted to a key that only your machine holds. This tool replaces `save_secret_to_file` with the SSE and Streamable HTTP transports, and with stdio when `--encrypted-secret-access` is set. The Docker image sets it by default. The agent runs these steps with the `openssl` that ships with macOS and most Linux distributions, so usually nothing needs installing:
+
+1. Create a one-time key pair: `(umask 077; openssl genrsa -out /tmp/k8s-secret-key.pem 4096)`
+2. Print its public key: `openssl rsa -in /tmp/k8s-secret-key.pem -pubout`
+3. Call `get_secret_encrypted` with the public key, the private key path and the output path. The server encrypts the value with RSA-OAEP and returns a `decrypt_command`. Values larger than one RSA block are split into several blocks.
+4. Run `decrypt_command`. It writes the value to the output path with owner-only permissions, refuses to overwrite an existing file, and deletes the private key once decryption succeeds. The agent is told to delete the decrypted file when the script no longer needs it.
+
+The conversation only ever holds the public key and the encrypted blocks. Neither can recover the value without the private key, which never leaves your machine and is deleted after use. The server keeps no state, so this works with multiple stateless replicas.
+
+### What this protects against
+
+These tools keep Secret values out of the conversation history and client logs. They do not stop an agent with shell access from reading the file afterwards, for example with `cat`. The server instructions tell the agent not to, but that is guidance, not enforcement. To stop an agent from reaching Secrets at all, use `--disabled-resources=secrets`, which also makes the secret tools refuse every request.
+
+### Restoring the old behavior: `--insecure-secret-access`
+
+`--insecure-secret-access` (or `MCP_KUBERNETES_RO_INSECURE_SECRET_ACCESS=true`) makes `get_resource` return Secret values as stored and removes both secret tools. Every value an agent reads then stays readable in the conversation history and client logs. The server prints a warning at startup when it is enabled.
 
 ## Running Modes
 
@@ -304,6 +347,12 @@ The following command-line flags are available to configure the MCP server:
 - `--disabled-resources=RESOURCES`: Resource types to block, repeatable and comma-separated (optional). Accepts resource names (`secrets`, `deploy`, `cm`) or full specs (`core/v1/secrets`, `apps/v1/deployments`)
 - `MCP_KUBERNETES_RO_DISABLED_TOOLS`: Environment variable for disabled tools (merged with flag values, fallback: `DISABLED_TOOLS`)
 - `MCP_KUBERNETES_RO_DISABLED_RESOURCES`: Environment variable for disabled resources (merged with flag values)
+
+### Secret Access
+- `--encrypted-secret-access`: Offer `get_secret_encrypted` instead of `save_secret_to_file` even with stdio, for when the server cannot write to your disk. On by default in the Docker image
+- `MCP_KUBERNETES_RO_ENCRYPTED_SECRET_ACCESS`: Environment variable for the same setting (set to `true`, `1`, or `yes`)
+- `--insecure-secret-access`: Return Secret values from `get_resource` as stored and disable the secret tools; overrides `--encrypted-secret-access` (disabled by default, not recommended; see [Secret Values](#secret-values))
+- `MCP_KUBERNETES_RO_INSECURE_SECRET_ACCESS`: Environment variable for the same setting (set to `true`, `1`, or `yes`)
 
 ### Port Forwarding
 - `--enable-port-forwarding`: Enable port forwarding tools (disabled by default)
@@ -366,7 +415,7 @@ Lists any Kubernetes resources by type with optional filtering, sorted newest fi
 
 ### Get Resource
 
-Gets specific resource details with complete configuration.
+Gets specific resource details with complete configuration. For Secrets, values are hidden and shown only with their size unless `--insecure-secret-access` is set; see [Secret Values](#secret-values).
 
 **Arguments:**
 - `resource_type` (required): The type of resource to get
@@ -899,7 +948,7 @@ While this MCP server provides comprehensive tools for Kubernetes cluster inspec
 
 ### Potential Limitations
 
-- **Secret Access**: Some AI assistants may refuse to retrieve, decode, or display Kubernetes secrets (even using the provided `get_resource` and `decode_base64` tools) due to security policies around credential handling
+- **Secret Access**: Some AI assistants may refuse to retrieve or handle Kubernetes Secret values due to security policies around credential handling, even through `save_secret_to_file` or `get_secret_encrypted`
 - **Sensitive Data**: AI models may have built-in restrictions against exposing sensitive information in chat interfaces, regardless of user permissions or tool availability
 - **Security Patterns**: Certain AI assistants prioritize security best practices over technical capability, potentially refusing operations that could expose sensitive data
 
@@ -967,8 +1016,9 @@ Resource filters configured via `--disabled-resources` are similarly deferred: n
 
 ## Security Considerations
 
-- **Read-Only Access**: The server only supports read operations (`get`, `list`, `watch`)
+- **Read-Only Access**: The server only supports read operations (`get`, `list`, `watch`) against the cluster. The one write it makes is `save_secret_to_file` creating a new local file in stdio mode
 - **Resource Access Control**: Block AI agents from querying specific resource types (e.g., Secrets) using `--disabled-resources`
+- **Secret Values Hidden by Default**: Secret values never appear in tool output unless `--insecure-secret-access` is set. See [Secret Values](#secret-values)
 - **Local Authentication**: Uses your existing kubectl configuration and credentials
 - **No Destructive Operations**: Cannot create, update, or delete resources
 - **Namespace Isolation**: Respects RBAC permissions from your kubeconfig

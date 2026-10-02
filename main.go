@@ -42,15 +42,17 @@ func (s *stringSlice) Set(value string) error {
 }
 
 var (
-	kubeconfig           = flag.String("kubeconfig", "", "Path to kubeconfig file")
-	namespace            = flag.String("namespace", "", "Default namespace")
-	transport            = flag.String("transport", "stdio", "Transport type: stdio, sse, or streamable-http")
-	port                 = flag.Int("port", 8080, "Port for HTTP-based transports (only used with -transport=sse or -transport=streamable-http)")
-	disabledTools        stringSlice
-	disabledResources    stringSlice
-	enablePortForwarding = flag.Bool("enable-port-forwarding", false, "Enable port forwarding tools (start_port_forward, stop_port_forward, list_port_forwards)")
-	alwaysStart          = flag.Bool("always-start", false, "Skip the startup connectivity check and start the MCP server immediately. Useful for short-lived or browser-flow OIDC credentials that are not yet valid at process start. Connectivity and authentication errors will be reported as tool call failures instead of preventing startup.")
-	version              = "dev"
+	kubeconfig            = flag.String("kubeconfig", "", "Path to kubeconfig file")
+	namespace             = flag.String("namespace", "", "Default namespace")
+	transport             = flag.String("transport", "stdio", "Transport type: stdio, sse, or streamable-http")
+	port                  = flag.Int("port", 8080, "Port for HTTP-based transports (only used with -transport=sse or -transport=streamable-http)")
+	disabledTools         stringSlice
+	disabledResources     stringSlice
+	enablePortForwarding  = flag.Bool("enable-port-forwarding", false, "Enable port forwarding tools (start_port_forward, stop_port_forward, list_port_forwards)")
+	insecureSecretAccess  = flag.Bool("insecure-secret-access", false, "Return Secret values from get_resource as stored (base64-encoded) and disable the safe secret tools. Not recommended: base64 is not encryption, so every value read ends up readable in the conversation history and client logs. By default values are hidden and retrieved with save_secret_to_file (stdio) or get_secret_encrypted (remote transports).")
+	encryptedSecretAccess = flag.Bool("encrypted-secret-access", false, "Offer get_secret_encrypted instead of save_secret_to_file even with the stdio transport. Use it when the server cannot write to the user's disk, for example inside a container. The Docker image enables it by default.")
+	alwaysStart           = flag.Bool("always-start", false, "Skip the startup connectivity check and start the MCP server immediately. Useful for short-lived or browser-flow OIDC credentials that are not yet valid at process start. Connectivity and authentication errors will be reported as tool call failures instead of preventing startup.")
+	version               = "dev"
 )
 
 func init() {
@@ -93,6 +95,27 @@ func main() {
 		if val := strings.TrimSpace(os.Getenv("MCP_KUBERNETES_RO_ALWAYS_START")); val != "" {
 			alwaysStartEnabled = strings.EqualFold(val, "true") || val == "1" || strings.EqualFold(val, "yes")
 		}
+	}
+
+	// Resolve insecure secret access flag from CLI or environment variable
+	insecureSecretAccessEnabled := *insecureSecretAccess
+	if !insecureSecretAccessEnabled {
+		if val := strings.TrimSpace(os.Getenv("MCP_KUBERNETES_RO_INSECURE_SECRET_ACCESS")); val != "" {
+			insecureSecretAccessEnabled = strings.EqualFold(val, "true") || val == "1" || strings.EqualFold(val, "yes")
+		}
+	}
+
+	// Resolve encrypted secret access flag from CLI or environment variable
+	encryptedSecretAccessEnabled := *encryptedSecretAccess
+	if !encryptedSecretAccessEnabled {
+		if val := strings.TrimSpace(os.Getenv("MCP_KUBERNETES_RO_ENCRYPTED_SECRET_ACCESS")); val != "" {
+			encryptedSecretAccessEnabled = strings.EqualFold(val, "true") || val == "1" || strings.EqualFold(val, "yes")
+		}
+	}
+
+	secretAccessMode := handlers.SecretAccessModeFor(*transport, insecureSecretAccessEnabled, encryptedSecretAccessEnabled)
+	if secretAccessMode == handlers.SecretAccessInsecure {
+		fmt.Fprintln(os.Stderr, "WARNING: --insecure-secret-access is enabled. get_resource returns Secret values as stored (base64 is not encryption), so any value read stays readable in the conversation history and client logs.")
 	}
 
 	kubeConfig := &kubernetes.Config{
@@ -146,10 +169,11 @@ func main() {
 	}
 
 	// Define tools and handlers
-	resourceHandler := handlers.NewResourceHandler(client, resFilter, alwaysStartEnabled)
+	resourceHandler := handlers.NewResourceHandler(client, resFilter, alwaysStartEnabled, secretAccessMode)
 	logHandler := handlers.NewLogHandler(client, alwaysStartEnabled)
 	metricsHandler := handlers.NewMetricsHandler(client, alwaysStartEnabled)
 	utilsHandler := handlers.NewUtilsHandler()
+	secretHandler := handlers.NewSecretHandler(client, resFilter, alwaysStartEnabled, secretAccessMode)
 
 	// Create port-forward manager (may be nil if not enabled)
 	var pfManager *portforward.Manager
@@ -168,7 +192,7 @@ func main() {
 	// Build server instructions
 	instructions := "This MCP server provides read-only access to Kubernetes clusters. It can list resources, get resource details, retrieve pod logs, discover API resources, get node and pod metrics, and perform base64 encoding/decoding operations.\n\n" +
 		"IMPORTANT LIMITATIONS AND GUIDELINES:\n" +
-		"• This is a READ-ONLY server - it cannot perform any destructive or write operations\n" +
+		"• This is a READ-ONLY server - it cannot perform any destructive or write operations against the cluster\n" +
 		"• DO NOT execute commands that modify cluster state through shell commands or kubectl\n" +
 		"• Always ask for explicit user permission before suggesting any write operations\n" +
 		"• When suggesting write operations, provide kubectl commands as examples rather than executing them\n" +
@@ -190,6 +214,8 @@ func main() {
 			"• Each session can forward multiple ports simultaneously."
 	}
 
+	instructions += "\n\n" + handlers.SecretAccessInstructions(secretAccessMode)
+
 	s := server.NewMCPServer(
 		"mcp-kubernetes-ro",
 		version,
@@ -203,6 +229,7 @@ func main() {
 		logHandler,
 		metricsHandler,
 		utilsHandler,
+		secretHandler,
 	}
 
 	if portForwardingEnabled {
