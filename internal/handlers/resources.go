@@ -15,6 +15,7 @@ import (
 	"github.com/patrickdappollonio/mcp-kubernetes-ro/internal/kubernetes"
 	"github.com/patrickdappollonio/mcp-kubernetes-ro/internal/resourcefilter"
 	"github.com/patrickdappollonio/mcp-kubernetes-ro/internal/response"
+	"github.com/patrickdappollonio/mcp-kubernetes-ro/internal/secrets"
 )
 
 // ResourceHandler provides MCP tools for Kubernetes resource operations.
@@ -25,6 +26,7 @@ type ResourceHandler struct {
 	client         *kubernetes.Client
 	resourceFilter *resourcefilter.Filter
 	alwaysStart    bool
+	exposeSecrets  bool
 }
 
 // NewResourceHandler creates a new ResourceHandler with the provided Kubernetes client
@@ -32,11 +34,13 @@ type ResourceHandler struct {
 // alwaysStart mirrors the --always-start flag: when true, connectivity and auth errors
 // are intercepted and returned as structured tool errors so the LLM can surface them
 // to the user rather than treating them as retryable failures.
-func NewResourceHandler(client *kubernetes.Client, filter *resourcefilter.Filter, alwaysStart bool) *ResourceHandler {
+// exposeSecrets mirrors --insecure-secret-access: when false, Secret values are hidden.
+func NewResourceHandler(client *kubernetes.Client, filter *resourcefilter.Filter, alwaysStart, exposeSecrets bool) *ResourceHandler {
 	return &ResourceHandler{
 		client:         client,
 		resourceFilter: filter,
 		alwaysStart:    alwaysStart,
+		exposeSecrets:  exposeSecrets,
 	}
 }
 
@@ -154,7 +158,7 @@ func (h *ResourceHandler) ListResources(ctx context.Context, request mcp.CallToo
 		if titleOnly {
 			items[i] = extractResourceTitle(&resource)
 		} else {
-			items[i] = extractResourceSummary(&resource, params.IncludeManagedFields)
+			items[i] = prepareResourceSummary(gvr, &resource, params.IncludeManagedFields, h.exposeSecrets)
 		}
 	}
 
@@ -275,7 +279,28 @@ func (h *ResourceHandler) GetResource(ctx context.Context, request mcp.CallToolR
 		return response.Errorf("failed to get resource: %v", err)
 	}
 
-	return response.JSON(sanitizeResourceObject(resource.Object, params.IncludeManagedFields))
+	return response.JSON(prepareResourceObject(gvr, resource.Object, params.IncludeManagedFields, h.exposeSecrets))
+}
+
+// prepareResourceObject sanitizes a resource for get_resource and, unless
+// exposeSecrets is set, hides the values of a Secret.
+func prepareResourceObject(gvr schema.GroupVersionResource, obj map[string]any, includeManagedFields, exposeSecrets bool) map[string]any {
+	obj = sanitizeResourceObject(obj, includeManagedFields)
+	if !exposeSecrets && secrets.IsSecret(gvr) {
+		obj = secrets.Redact(obj)
+	}
+	return obj
+}
+
+// prepareResourceSummary summarizes a resource for list_resources and, unless
+// exposeSecrets is set, removes the annotation that holds a copy of a
+// Secret's values.
+func prepareResourceSummary(gvr schema.GroupVersionResource, resource *unstructured.Unstructured, includeManagedFields, exposeSecrets bool) map[string]any {
+	summary := extractResourceSummary(resource, includeManagedFields)
+	if metadata, ok := summary["metadata"].(map[string]any); ok && !exposeSecrets && secrets.IsSecret(gvr) {
+		summary["metadata"] = secrets.StripLastApplied(metadata)
+	}
+	return summary
 }
 
 // extractResourceTitle extracts only the resource name for title-only listing operations.
@@ -575,6 +600,11 @@ func (h *ResourceHandler) ListContexts(_ context.Context, request mcp.CallToolRe
 // This includes tools for listing resources, getting specific resources,
 // discovering API resources, and managing Kubernetes contexts.
 func (h *ResourceHandler) GetTools() []MCPTool {
+	getResourceDescription := "Get specific resource details. metadata.managedFields is omitted unless include_managed_fields=true."
+	if !h.exposeSecrets {
+		getResourceDescription += " Secret values are hidden and shown only with their size; to use a value, follow the SECRETS section of the server instructions."
+	}
+
 	return []MCPTool{
 		NewMCPTool(
 			mcp.NewTool("list_resources",
@@ -617,7 +647,7 @@ func (h *ResourceHandler) GetTools() []MCPTool {
 		),
 		NewMCPTool(
 			mcp.NewTool("get_resource",
-				mcp.WithDescription("Get specific resource details. metadata.managedFields is omitted unless include_managed_fields=true."),
+				mcp.WithDescription(getResourceDescription),
 				mcp.WithString("resource_type",
 					mcp.Required(),
 					mcp.Description("The type of resource to get"),

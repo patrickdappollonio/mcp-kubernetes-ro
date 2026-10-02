@@ -49,6 +49,7 @@ var (
 	disabledTools        stringSlice
 	disabledResources    stringSlice
 	enablePortForwarding = flag.Bool("enable-port-forwarding", false, "Enable port forwarding tools (start_port_forward, stop_port_forward, list_port_forwards)")
+	insecureSecretAccess = flag.Bool("insecure-secret-access", false, "Return Secret values from get_resource as stored (base64-encoded) and disable the safe secret tools. Not recommended: base64 is not encryption, so every value read ends up readable in the conversation history and client logs. By default values are hidden and retrieved with save_secret_to_file (stdio) or get_secret_encrypted (remote transports).")
 	alwaysStart          = flag.Bool("always-start", false, "Skip the startup connectivity check and start the MCP server immediately. Useful for short-lived or browser-flow OIDC credentials that are not yet valid at process start. Connectivity and authentication errors will be reported as tool call failures instead of preventing startup.")
 	version              = "dev"
 )
@@ -93,6 +94,19 @@ func main() {
 		if val := strings.TrimSpace(os.Getenv("MCP_KUBERNETES_RO_ALWAYS_START")); val != "" {
 			alwaysStartEnabled = strings.EqualFold(val, "true") || val == "1" || strings.EqualFold(val, "yes")
 		}
+	}
+
+	// Resolve insecure secret access flag from CLI or environment variable
+	insecureSecretAccessEnabled := *insecureSecretAccess
+	if !insecureSecretAccessEnabled {
+		if val := strings.TrimSpace(os.Getenv("MCP_KUBERNETES_RO_INSECURE_SECRET_ACCESS")); val != "" {
+			insecureSecretAccessEnabled = strings.EqualFold(val, "true") || val == "1" || strings.EqualFold(val, "yes")
+		}
+	}
+
+	secretAccessMode := handlers.SecretAccessModeFor(*transport, insecureSecretAccessEnabled)
+	if secretAccessMode == handlers.SecretAccessInsecure {
+		fmt.Fprintln(os.Stderr, "WARNING: --insecure-secret-access is enabled. get_resource returns Secret values as stored (base64 is not encryption), so any value read stays readable in the conversation history and client logs.")
 	}
 
 	kubeConfig := &kubernetes.Config{
@@ -146,10 +160,11 @@ func main() {
 	}
 
 	// Define tools and handlers
-	resourceHandler := handlers.NewResourceHandler(client, resFilter, alwaysStartEnabled)
+	resourceHandler := handlers.NewResourceHandler(client, resFilter, alwaysStartEnabled, secretAccessMode == handlers.SecretAccessInsecure)
 	logHandler := handlers.NewLogHandler(client, alwaysStartEnabled)
 	metricsHandler := handlers.NewMetricsHandler(client, alwaysStartEnabled)
 	utilsHandler := handlers.NewUtilsHandler()
+	secretHandler := handlers.NewSecretHandler(client, resFilter, alwaysStartEnabled, secretAccessMode)
 
 	// Create port-forward manager (may be nil if not enabled)
 	var pfManager *portforward.Manager
@@ -190,6 +205,8 @@ func main() {
 			"• Each session can forward multiple ports simultaneously."
 	}
 
+	instructions += "\n\n" + handlers.SecretAccessInstructions(secretAccessMode)
+
 	s := server.NewMCPServer(
 		"mcp-kubernetes-ro",
 		version,
@@ -203,6 +220,7 @@ func main() {
 		logHandler,
 		metricsHandler,
 		utilsHandler,
+		secretHandler,
 	}
 
 	if portForwardingEnabled {

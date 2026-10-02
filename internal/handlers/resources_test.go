@@ -2,9 +2,11 @@ package handlers
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 func TestSanitizeMetadata(t *testing.T) {
@@ -221,5 +223,104 @@ func TestExtractResourceTitleIsUnchanged(t *testing.T) {
 
 	if !reflect.DeepEqual(title, want) {
 		t.Fatalf("extractResourceTitle() mismatch\nwant: %#v\ngot:  %#v", want, title)
+	}
+}
+
+func secretObject() map[string]any {
+	return map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Secret",
+		"metadata": map[string]any{
+			"name": "db",
+			"annotations": map[string]any{
+				"kubectl.kubernetes.io/last-applied-configuration": `{"data":{"password":"czNjcjN0"}}`,
+			},
+		},
+		"data": map[string]any{"password": "czNjcjN0"},
+	}
+}
+
+var (
+	secretGVR = schema.GroupVersionResource{Version: "v1", Resource: "secrets"}
+	podGVR    = schema.GroupVersionResource{Version: "v1", Resource: "pods"}
+)
+
+func TestPrepareResourceObjectHidesSecretValues(t *testing.T) {
+	t.Parallel()
+
+	got := prepareResourceObject(secretGVR, secretObject(), false, false)
+
+	if v := got["data"].(map[string]any)["password"]; v != "[redacted: 6 bytes]" {
+		t.Fatalf("data.password = %v, want it redacted", v)
+	}
+	annotations := got["metadata"].(map[string]any)["annotations"].(map[string]any)
+	if _, ok := annotations["kubectl.kubernetes.io/last-applied-configuration"]; ok {
+		t.Fatal("last-applied-configuration annotation was not removed")
+	}
+}
+
+func TestPrepareResourceObjectExposesSecretValuesWhenInsecure(t *testing.T) {
+	t.Parallel()
+
+	got := prepareResourceObject(secretGVR, secretObject(), false, true)
+
+	if v := got["data"].(map[string]any)["password"]; v != "czNjcjN0" {
+		t.Fatalf("data.password = %v, want the original value", v)
+	}
+}
+
+func TestPrepareResourceObjectLeavesOtherResourcesAlone(t *testing.T) {
+	t.Parallel()
+
+	obj := secretObject()
+	obj["kind"] = "Pod"
+
+	got := prepareResourceObject(podGVR, obj, false, false)
+
+	if v := got["data"].(map[string]any)["password"]; v != "czNjcjN0" {
+		t.Fatalf("data.password = %v, want non-Secret data untouched", v)
+	}
+}
+
+func TestPrepareResourceSummaryHidesSecretLastApplied(t *testing.T) {
+	t.Parallel()
+
+	resource := &unstructured.Unstructured{Object: secretObject()}
+
+	got := prepareResourceSummary(secretGVR, resource, false, false)
+
+	metadata := got["metadata"].(map[string]any)
+	if annotations, ok := metadata["annotations"].(map[string]any); ok {
+		if _, found := annotations["kubectl.kubernetes.io/last-applied-configuration"]; found {
+			t.Fatal("last-applied-configuration annotation was not removed from the summary")
+		}
+	}
+
+	exposed := prepareResourceSummary(secretGVR, resource, false, true)
+	annotations := exposed["metadata"].(map[string]any)["annotations"].(map[string]any)
+	if _, found := annotations["kubectl.kubernetes.io/last-applied-configuration"]; !found {
+		t.Fatal("last-applied-configuration annotation was removed even with insecure access")
+	}
+}
+
+func TestGetResourceDescriptionMentionsHiddenSecrets(t *testing.T) {
+	t.Parallel()
+
+	description := func(exposeSecrets bool) string {
+		h := &ResourceHandler{exposeSecrets: exposeSecrets}
+		for _, tool := range h.GetTools() {
+			if tool.Tool().Name == "get_resource" {
+				return tool.Tool().Description
+			}
+		}
+		t.Fatal("get_resource tool not found")
+		return ""
+	}
+
+	if got := description(false); !strings.Contains(got, "Secret values are hidden") {
+		t.Fatalf("description does not say Secret values are hidden: %s", got)
+	}
+	if got := description(true); strings.Contains(got, "Secret values are hidden") {
+		t.Fatalf("description says Secret values are hidden under insecure access: %s", got)
 	}
 }
