@@ -330,3 +330,97 @@ func TestSecretAccessInstructions(t *testing.T) {
 		}
 	}
 }
+
+func TestSecretToolsReportInvalidBase64(t *testing.T) {
+	t.Parallel()
+
+	getter := func(context.Context, string, string, string) (*unstructured.Unstructured, error) {
+		return &unstructured.Unstructured{Object: map[string]any{
+			"data": map[string]any{"password": "not base64!"},
+		}}, nil
+	}
+	h := &SecretHandler{mode: SecretAccessFile, getSecret: getter}
+	path := filepath.Join(t.TempDir(), "x")
+
+	text, isError := callTool(t, h.SaveSecretToFile, map[string]any{
+		"namespace": "prod", "name": "db", "key": "password", "path": path,
+	})
+	if !isError || !strings.Contains(text, "not valid base64") {
+		t.Fatalf("expected a base64 error, got isError=%v text=%s", isError, text)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("file was written for an invalid value")
+	}
+}
+
+func TestSecretDataValue(t *testing.T) {
+	t.Parallel()
+
+	secret := &unstructured.Unstructured{Object: map[string]any{
+		"data": map[string]any{
+			"password": "czNjcjN0", // "s3cr3t"
+			"username": "YWRtaW4=", // "admin"
+			"broken":   "not base64!",
+		},
+	}}
+
+	tests := []struct {
+		name    string
+		secret  *unstructured.Unstructured
+		key     string
+		want    string
+		wantErr string
+	}{
+		{name: "decodes the value", secret: secret, key: "password", want: "s3cr3t"},
+		{name: "missing key lists the keys", secret: secret, key: "token", wantErr: `secret "db" has no key "token"; available keys: broken, password, username`},
+		{name: "invalid base64", secret: secret, key: "broken", wantErr: `secret key "broken" is not valid base64`},
+		{name: "secret without data", secret: &unstructured.Unstructured{Object: map[string]any{}}, key: "password", wantErr: `secret "db" has no key "password"; available keys: `},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := secretDataValue(tt.secret, "db", tt.key)
+			if tt.wantErr != "" {
+				if err == nil || !strings.HasPrefix(err.Error(), tt.wantErr) {
+					t.Fatalf("error = %v, want prefix %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if string(got) != tt.want {
+				t.Fatalf("value = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+type failingResolver struct{}
+
+func (failingResolver) ResolveResourceType(string, string) (schema.GroupVersionResource, error) {
+	return schema.GroupVersionResource{}, errors.New("discovery unavailable")
+}
+
+func TestSecretToolsFailClosedWhenFilterCannotInitialize(t *testing.T) {
+	t.Parallel()
+
+	filter, err := resourcefilter.NewLazyFilter("secrets", failingResolver{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &SecretHandler{mode: SecretAccessFile, getSecret: fakeSecret(), resourceFilter: filter}
+	path := filepath.Join(t.TempDir(), "x")
+
+	text, isError := callTool(t, h.SaveSecretToFile, map[string]any{
+		"namespace": "prod", "name": "db", "key": "password", "path": path,
+	})
+	if !isError || !strings.Contains(text, "resource filter could not be initialized") || !strings.Contains(text, "discovery unavailable") {
+		t.Fatalf("expected a filter initialization error, got isError=%v text=%s", isError, text)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("file was written while the filter could not initialize")
+	}
+}

@@ -182,14 +182,8 @@ func (h *SecretHandler) secretValue(ctx context.Context, ref *secretRef) ([]byte
 		return nil, mcp.NewToolResultError("key is required")
 	}
 
-	if h.resourceFilter != nil && h.resourceFilter.IsDisabled(secrets.GVR) {
-		if initErr := h.resourceFilter.InitError(); initErr != nil {
-			if h.alwaysStart && connectivity.IsError(initErr) {
-				return nil, mcp.NewToolResultError(connectivity.ErrorMessage(initErr))
-			}
-			return nil, mcp.NewToolResultError(fmt.Sprintf("resource filter could not be initialized: %v", initErr))
-		}
-		return nil, mcp.NewToolResultError(fmt.Sprintf("access to secrets (%s) is disabled by configuration", resourcefilter.FormatGVR(secrets.GVR)))
+	if blocked := h.secretsBlocked(); blocked != nil {
+		return nil, blocked
 	}
 
 	secret, err := h.getSecret(ctx, ref.Context, ref.Namespace, ref.Name)
@@ -200,16 +194,44 @@ func (h *SecretHandler) secretValue(ctx context.Context, ref *secretRef) ([]byte
 		return nil, mcp.NewToolResultError(fmt.Sprintf("failed to get secret: %v", err))
 	}
 
+	value, err := secretDataValue(secret, ref.Name, ref.Key)
+	if err != nil {
+		return nil, mcp.NewToolResultError(err.Error())
+	}
+
+	return value, nil
+}
+
+// secretsBlocked returns a tool error when --disabled-resources blocks Secrets
+// or the filter could not initialize, and nil when Secrets may be read.
+func (h *SecretHandler) secretsBlocked() *mcp.CallToolResult {
+	if h.resourceFilter == nil || !h.resourceFilter.IsDisabled(secrets.GVR) {
+		return nil
+	}
+
+	if initErr := h.resourceFilter.InitError(); initErr != nil {
+		if h.alwaysStart && connectivity.IsError(initErr) {
+			return mcp.NewToolResultError(connectivity.ErrorMessage(initErr))
+		}
+		return mcp.NewToolResultError(fmt.Sprintf("resource filter could not be initialized: %v", initErr))
+	}
+
+	return mcp.NewToolResultError(fmt.Sprintf("access to secrets (%s) is disabled by configuration", resourcefilter.FormatGVR(secrets.GVR)))
+}
+
+// secretDataValue returns the decoded value of key in a Secret's data. The
+// error for a missing key lists the available keys.
+func secretDataValue(secret *unstructured.Unstructured, name, key string) ([]byte, error) {
 	data, _ := secret.Object["data"].(map[string]any)
-	encoded, ok := data[ref.Key].(string)
+	encoded, ok := data[key].(string)
 	if !ok {
 		keys := slices.Sorted(maps.Keys(data))
-		return nil, mcp.NewToolResultError(fmt.Sprintf("secret %q has no key %q; available keys: %s", ref.Name, ref.Key, strings.Join(keys, ", ")))
+		return nil, fmt.Errorf("secret %q has no key %q; available keys: %s", name, key, strings.Join(keys, ", "))
 	}
 
 	value, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
-		return nil, mcp.NewToolResultError(fmt.Sprintf("secret key %q is not valid base64: %v", ref.Key, err))
+		return nil, fmt.Errorf("secret key %q is not valid base64: %w", key, err)
 	}
 
 	return value, nil

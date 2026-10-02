@@ -17,21 +17,20 @@ func DecryptCommand(blocks []string, privateKeyPath, outputPath string) string {
 	out := shellQuote(outputPath)
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "(\n")
-	fmt.Fprintf(&b, "  set -C\n")
-	fmt.Fprintf(&b, "  umask 077\n")
-	fmt.Fprintf(&b, "  while IFS= read -r block; do\n")
-	fmt.Fprintf(&b, "    printf '%%s' \"$block\" | openssl base64 -d -A |\n")
-	fmt.Fprintf(&b, "      openssl pkeyutl -decrypt -inkey %s -pkeyopt rsa_padding_mode:oaep ||\n", key)
-	fmt.Fprintf(&b, "      { rm -f %s; exit 1; }\n", out)
-	fmt.Fprintf(&b, "  done > %s\n", out)
-	fmt.Fprintf(&b, ") <<'%s' && rm -f %s\n", heredocDelimiter, key)
+	fmt.Fprintf(&b, `(
+  set -C
+  umask 077
+  while IFS= read -r block; do
+    printf '%%s' "$block" | openssl base64 -d -A |
+      openssl pkeyutl -decrypt -inkey %[1]s -pkeyopt rsa_padding_mode:oaep ||
+      { rm -f %[2]s; exit 1; }
+  done > %[2]s
+) <<'%[3]s' && rm -f %[1]s
+`, key, out, heredocDelimiter)
 	for _, block := range blocks {
-		b.WriteString(block)
-		b.WriteByte('\n')
+		b.WriteString(block + "\n")
 	}
-	b.WriteString(heredocDelimiter)
-	b.WriteByte('\n')
+	b.WriteString(heredocDelimiter + "\n")
 
 	return b.String()
 }
