@@ -282,8 +282,6 @@ func (h *ResourceHandler) GetResource(ctx context.Context, request mcp.CallToolR
 	return response.JSON(prepareResourceObject(gvr, resource.Object, params.IncludeManagedFields, h.exposeSecrets))
 }
 
-// prepareResourceObject sanitizes a resource for get_resource and, unless
-// exposeSecrets is set, hides the values of a Secret.
 func prepareResourceObject(gvr schema.GroupVersionResource, obj map[string]any, includeManagedFields, exposeSecrets bool) map[string]any {
 	obj = sanitizeResourceObject(obj, includeManagedFields)
 	if !exposeSecrets && secrets.IsSecret(gvr) {
@@ -292,9 +290,6 @@ func prepareResourceObject(gvr schema.GroupVersionResource, obj map[string]any, 
 	return obj
 }
 
-// prepareResourceSummary summarizes a resource for list_resources and, unless
-// exposeSecrets is set, removes the annotation that holds a copy of a
-// Secret's values.
 func prepareResourceSummary(gvr schema.GroupVersionResource, resource *unstructured.Unstructured, includeManagedFields, exposeSecrets bool) map[string]any {
 	summary := extractResourceSummary(resource, includeManagedFields)
 	if metadata, ok := summary["metadata"].(map[string]any); ok && !exposeSecrets && secrets.IsSecret(gvr) {

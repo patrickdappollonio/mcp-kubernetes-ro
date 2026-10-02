@@ -14,14 +14,11 @@ import (
 // MinKeyBits is the smallest RSA key Encrypt accepts.
 const MinKeyBits = 2048
 
-// Encrypt encrypts plaintext to an RSA public key in PEM form (PKIX "PUBLIC
-// KEY" or PKCS#1 "RSA PUBLIC KEY") and returns base64-encoded RSA-OAEP blocks.
-// Values larger than one block are split, and decrypting each block in order
-// and concatenating the results restores the value.
+// Encrypt encrypts plaintext to a PEM RSA public key (PKIX or PKCS#1) and returns base64
+// RSA-OAEP blocks; decrypting them in order and concatenating the results restores it.
 //
-// OAEP uses SHA-1 because it is the only hash the LibreSSL openssl shipped with
-// macOS lets "pkeyutl -decrypt" use. SHA-1's collision weaknesses do not affect
-// OAEP's security.
+// OAEP uses SHA-1: it is the default of "openssl pkeyutl", and LibreSSL documents no
+// option to change it. SHA-1's collision weakness does not affect OAEP.
 func Encrypt(publicKeyPEM string, plaintext []byte) ([]string, error) {
 	pub, err := parsePublicKey(publicKeyPEM)
 	if err != nil {

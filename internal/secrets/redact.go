@@ -20,9 +20,8 @@ func IsSecret(gvr schema.GroupVersionResource) bool {
 	return gvr == GVR
 }
 
-// Redact returns a copy of a Secret object with every value in data and
-// stringData replaced by its size, and with the last-applied-configuration
-// annotation removed. The input is not modified.
+// Redact returns a copy of a Secret object with each data and stringData value
+// replaced by its size and the last-applied-configuration annotation removed.
 func Redact(obj map[string]any) map[string]any {
 	out := maps.Clone(obj)
 

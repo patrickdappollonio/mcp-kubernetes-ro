@@ -22,15 +22,12 @@ import (
 type SecretAccessMode int
 
 const (
-	// SecretAccessFile hides Secret values and offers save_secret_to_file,
-	// which writes a value straight to the user's disk. Used with stdio,
-	// where the server runs on the user's machine.
+	// SecretAccessFile hides Secret values and offers save_secret_to_file.
+	// Used with stdio, where the server runs on the user's machine.
 	SecretAccessFile SecretAccessMode = iota
 
-	// SecretAccessEncrypted hides Secret values and offers
-	// get_secret_encrypted, which encrypts a value to a public key whose
-	// private half never leaves the user's machine. Used with remote
-	// transports, where the server cannot reach the user's disk.
+	// SecretAccessEncrypted hides Secret values and offers get_secret_encrypted.
+	// Used with remote transports, where the server cannot reach the user's disk.
 	SecretAccessEncrypted
 
 	// SecretAccessInsecure returns Secret values as-is from get_resource and
@@ -112,9 +109,8 @@ type GetSecretEncryptedParams struct {
 	OutputPath string `json:"output_path"`
 }
 
-// SaveSecretToFile implements the save_secret_to_file MCP tool. It writes one
-// decoded Secret value to a new owner-only file and returns only its path and
-// size.
+// SaveSecretToFile implements the save_secret_to_file MCP tool: it writes one
+// Secret value to a new owner-only file and returns only the path and size.
 func (h *SecretHandler) SaveSecretToFile(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	var params SaveSecretToFileParams
 	if err := request.BindArguments(&params); err != nil {
@@ -141,9 +137,8 @@ func (h *SecretHandler) SaveSecretToFile(ctx context.Context, request mcp.CallTo
 	})
 }
 
-// GetSecretEncrypted implements the get_secret_encrypted MCP tool. It encrypts
-// one decoded Secret value to the caller's public key and returns a shell
-// command that decrypts it into a file on the caller's machine.
+// GetSecretEncrypted implements the get_secret_encrypted MCP tool: it returns one
+// Secret value encrypted to the caller's public key, as a command that decrypts it.
 func (h *SecretHandler) GetSecretEncrypted(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	var params GetSecretEncryptedParams
 	if err := request.BindArguments(&params); err != nil {
@@ -239,9 +234,8 @@ func secretRefOptions() []mcp.ToolOption {
 	}
 }
 
-// GetTools returns the secret tool for this handler's mode: save_secret_to_file
-// for SecretAccessFile, get_secret_encrypted for SecretAccessEncrypted, and
-// none for SecretAccessInsecure.
+// GetTools returns the secret tool for the handler's mode, or none for
+// SecretAccessInsecure.
 func (h *SecretHandler) GetTools() []MCPTool {
 	switch h.mode {
 	case SecretAccessFile:
@@ -291,8 +285,7 @@ func (h *SecretHandler) GetTools() []MCPTool {
 }
 
 // SecretAccessInstructions returns the SECRETS section of the server
-// instructions for mode, telling the agent how to retrieve Secret values and
-// why it should not try to read them any other way.
+// instructions for mode.
 func SecretAccessInstructions(mode SecretAccessMode) string {
 	const why = "Secret values are hidden: get_resource shows each key with its size, such as \"[redacted: 16 bytes]\", " +
 		"because anything returned by a tool stays readable in the conversation history and in client logs, " +

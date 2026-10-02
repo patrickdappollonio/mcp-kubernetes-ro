@@ -9,11 +9,9 @@ import (
 // hundreds of characters long, so no block can ever equal it.
 const heredocDelimiter = "K8S_SECRET_BLOCKS"
 
-// DecryptCommand returns a POSIX shell command that decrypts blocks produced
-// by Encrypt using the openssl CLI and writes the value to outputPath. The
-// command creates the file with owner-only permissions, refuses to overwrite
-// an existing file, removes a partially written file if any block fails to
-// decrypt, and deletes the private key once decryption succeeds.
+// DecryptCommand returns a POSIX shell command that decrypts Encrypt's blocks with openssl
+// into a new owner-only file at outputPath, then deletes the private key. The command
+// never overwrites an existing file and removes its output if any block fails.
 func DecryptCommand(blocks []string, privateKeyPath, outputPath string) string {
 	key := shellQuote(privateKeyPath)
 	out := shellQuote(outputPath)

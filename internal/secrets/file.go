@@ -8,9 +8,8 @@ import (
 	"path/filepath"
 )
 
-// WriteFile writes data to a new file at path that only its owner can read.
-// The path must be absolute so it does not depend on the server's working
-// directory. It never overwrites or follows an existing file or symlink.
+// WriteFile writes data to a new owner-only file at path, which must be absolute.
+// It never overwrites or follows an existing file or symlink.
 func WriteFile(path string, data []byte) error {
 	if !filepath.IsAbs(path) {
 		return fmt.Errorf("path %q must be absolute", path)
