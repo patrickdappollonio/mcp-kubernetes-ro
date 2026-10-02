@@ -65,7 +65,9 @@ Add the following configuration to your editor's settings to use `mcp-kubernetes
         // "--port=8080",
         // "--disabled-tools=get_logs,decode_base64",
         // "--disabled-resources=secrets",
-        // "--always-start"
+        // "--always-start",
+        // Not recommended, see "Secret Values" below:
+        // "--insecure-secret-access"
       ],
       "env": {
         // Set KUBECONFIG environment variable if needed:
@@ -77,7 +79,9 @@ Add the following configuration to your editor's settings to use `mcp-kubernetes
         // Disable access to specific resource types:
         // "MCP_KUBERNETES_RO_DISABLED_RESOURCES": "secrets,configmaps",
         // Skip startup connectivity check via environment variable:
-        // "MCP_KUBERNETES_RO_ALWAYS_START": "true"
+        // "MCP_KUBERNETES_RO_ALWAYS_START": "true",
+        // Return Secret values as stored (not recommended, see "Secret Values" below):
+        // "MCP_KUBERNETES_RO_INSECURE_SECRET_ACCESS": "true"
       }
     }
   }
@@ -112,7 +116,9 @@ You can also simplify the installation process by using it as an `npx` package:
         // Or use generic DISABLED_TOOLS environment variable:
         // "DISABLED_TOOLS": "get_logs,decode_base64",
         // Disable access to specific resource types:
-        // "MCP_KUBERNETES_RO_DISABLED_RESOURCES": "secrets,configmaps"
+        // "MCP_KUBERNETES_RO_DISABLED_RESOURCES": "secrets,configmaps",
+        // Return Secret values as stored (not recommended, see "Secret Values" below):
+        // "MCP_KUBERNETES_RO_INSECURE_SECRET_ACCESS": "true"
       }
     }
   }
@@ -145,7 +151,9 @@ And this is how to leverage the Docker image instead:
         // Or use generic DISABLED_TOOLS environment variable:
         // "DISABLED_TOOLS": "get_logs,decode_base64",
         // Disable access to specific resource types:
-        // "MCP_KUBERNETES_RO_DISABLED_RESOURCES": "secrets,configmaps"
+        // "MCP_KUBERNETES_RO_DISABLED_RESOURCES": "secrets,configmaps",
+        // Return Secret values as stored (not recommended, see "Secret Values" below):
+        // "MCP_KUBERNETES_RO_INSECURE_SECRET_ACCESS": "true"
       }
     },
   }
@@ -291,7 +299,7 @@ A remote server cannot write to your disk, so the value is encrypted to a key th
 1. Create a one-time key pair: `(umask 077; openssl genrsa -out /tmp/k8s-secret-key.pem 4096)`
 2. Print its public key: `openssl rsa -in /tmp/k8s-secret-key.pem -pubout`
 3. Call `get_secret_encrypted` with the public key, the private key path and the output path. The server encrypts the value with RSA-OAEP and returns a `decrypt_command`. Values larger than one RSA block are split into several blocks.
-4. Run `decrypt_command`. It writes the value to the output path with owner-only permissions, refuses to overwrite an existing file, and deletes the private key once decryption succeeds.
+4. Run `decrypt_command`. It writes the value to the output path with owner-only permissions, refuses to overwrite an existing file, and deletes the private key once decryption succeeds. The agent is told to delete the decrypted file when the script no longer needs it.
 
 The conversation only ever holds the public key and the encrypted blocks. Neither can recover the value without the private key, which never leaves your machine and is deleted after use. The server keeps no state, so this works with multiple stateless replicas.
 
