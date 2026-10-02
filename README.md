@@ -65,9 +65,7 @@ Add the following configuration to your editor's settings to use `mcp-kubernetes
         // "--port=8080",
         // "--disabled-tools=get_logs,decode_base64",
         // "--disabled-resources=secrets",
-        // "--always-start",
-        // Not recommended, see "Secret Values" below:
-        // "--insecure-secret-access"
+        // "--always-start"
       ],
       "env": {
         // Set KUBECONFIG environment variable if needed:
@@ -79,9 +77,7 @@ Add the following configuration to your editor's settings to use `mcp-kubernetes
         // Disable access to specific resource types:
         // "MCP_KUBERNETES_RO_DISABLED_RESOURCES": "secrets,configmaps",
         // Skip startup connectivity check via environment variable:
-        // "MCP_KUBERNETES_RO_ALWAYS_START": "true",
-        // Return Secret values as stored (not recommended, see "Secret Values" below):
-        // "MCP_KUBERNETES_RO_INSECURE_SECRET_ACCESS": "true"
+        // "MCP_KUBERNETES_RO_ALWAYS_START": "true"
       }
     }
   }
@@ -116,9 +112,7 @@ You can also simplify the installation process by using it as an `npx` package:
         // Or use generic DISABLED_TOOLS environment variable:
         // "DISABLED_TOOLS": "get_logs,decode_base64",
         // Disable access to specific resource types:
-        // "MCP_KUBERNETES_RO_DISABLED_RESOURCES": "secrets,configmaps",
-        // Return Secret values as stored (not recommended, see "Secret Values" below):
-        // "MCP_KUBERNETES_RO_INSECURE_SECRET_ACCESS": "true"
+        // "MCP_KUBERNETES_RO_DISABLED_RESOURCES": "secrets,configmaps"
       }
     }
   }
@@ -151,9 +145,7 @@ And this is how to leverage the Docker image instead:
         // Or use generic DISABLED_TOOLS environment variable:
         // "DISABLED_TOOLS": "get_logs,decode_base64",
         // Disable access to specific resource types:
-        // "MCP_KUBERNETES_RO_DISABLED_RESOURCES": "secrets,configmaps",
-        // Return Secret values as stored (not recommended, see "Secret Values" below):
-        // "MCP_KUBERNETES_RO_INSECURE_SECRET_ACCESS": "true"
+        // "MCP_KUBERNETES_RO_DISABLED_RESOURCES": "secrets,configmaps"
       }
     },
   }
